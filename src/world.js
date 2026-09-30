@@ -2,105 +2,15 @@
 // environment. Everything here is deliberately cheap - the crowd is the star.
 
 import * as THREE from 'three/webgpu';
+import { float, uniform, mix } from 'three/tsl';
+import { makeMaterial, groundColorNode, propMaterial } from './world/materials.js';
+import { treeGeometry, lampGeometry, monumentGeometry } from './world/geometry.js';
 import {
-	Fn, float, vec2, vec3, uniform, positionWorld, positionWorldDirection, floor, fract, sin, dot, mix,
-	smoothstep, min, abs, length, fog, color, max, pow, exponentialHeightFogFactor, clamp, fwidth
-} from 'three/tsl';
-import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { isCel, makeCelMaterial } from './cel.js';
+	applyShadowMode, replaceSun, rebuildPointLights, applySky, applyEnvironment, applyFog, updateSun, updatePointLights
+} from './world/lighting.js';
 
-export const SHADING_KINDS = [ 'unlit', 'lambert', 'phong', 'standard', 'physical', 'toon', 'celWW', 'celJSR' ];
-
-export function makeMaterial( kind, params = {} ) {
-
-	const common = { ...params };
-	if ( isCel( kind ) ) {
-
-		delete common.metalness;
-		delete common.roughness;
-		return makeCelMaterial( kind, common );
-
-	}
-	switch ( kind ) {
-
-		case 'lambert': return new THREE.MeshLambertNodeMaterial( common );
-		case 'phong': return new THREE.MeshPhongNodeMaterial( { shininess: 30, ...common } );
-		case 'standard': return new THREE.MeshStandardNodeMaterial( { roughness: 0.8, metalness: 0, ...common } );
-		case 'physical': return new THREE.MeshPhysicalNodeMaterial( { roughness: 0.7, metalness: 0, ...common } );
-		case 'toon': return new THREE.MeshToonNodeMaterial( common );
-		default: return new THREE.MeshBasicNodeMaterial( common );
-
-	}
-
-}
-
-// Classic float hash for procedural patterns (works for negative coordinates).
-const hash2 = ( p ) => fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ).mul( 43758.5453 ) );
-
-// --- tiny procedural prop geometries (vertex coloured, non-indexed merge) ------
-function coloredGeometry( parts ) {
-
-	const positions = [];
-	const colors = [];
-	for ( const { geometry, color: c, matrix } of parts ) {
-
-		const g = geometry.index ? geometry.toNonIndexed() : geometry;
-		if ( matrix ) g.applyMatrix4( matrix );
-		const pos = g.getAttribute( 'position' );
-		const col = new THREE.Color( c );
-		for ( let i = 0; i < pos.count; i ++ ) {
-
-			positions.push( pos.getX( i ), pos.getY( i ), pos.getZ( i ) );
-			colors.push( col.r, col.g, col.b );
-
-		}
-
-	}
-
-	const out = new THREE.BufferGeometry();
-	out.setAttribute( 'position', new THREE.Float32BufferAttribute( positions, 3 ) );
-	out.setAttribute( 'color', new THREE.Float32BufferAttribute( colors, 3 ) );
-	out.computeVertexNormals();
-	out.userData.triangles = positions.length / 9;
-	return out;
-
-}
-
-function treeGeometry() {
-
-	const m = new THREE.Matrix4();
-	return coloredGeometry( [
-		{ geometry: new THREE.CylinderGeometry( 0.18, 0.25, 2.2, 5, 1 ), color: 0x6b4a2f, matrix: m.clone().makeTranslation( 0, 1.1, 0 ) },
-		{ geometry: new THREE.ConeGeometry( 2.0, 3.2, 6, 1 ), color: 0x2f6b35, matrix: m.clone().makeTranslation( 0, 3.4, 0 ) },
-		{ geometry: new THREE.ConeGeometry( 1.5, 2.6, 6, 1 ), color: 0x3b7d3f, matrix: m.clone().makeTranslation( 0, 4.8, 0 ) }
-	] );
-
-}
-
-function lampGeometry() {
-
-	const m = new THREE.Matrix4();
-	return coloredGeometry( [
-		{ geometry: new THREE.CylinderGeometry( 0.08, 0.12, 4.2, 4, 1 ), color: 0x2c2f36, matrix: m.clone().makeTranslation( 0, 2.1, 0 ) },
-		{ geometry: new THREE.BoxGeometry( 0.9, 0.12, 0.12 ), color: 0x2c2f36, matrix: m.clone().makeTranslation( 0.35, 4.1, 0 ) }
-	] );
-
-}
-
-function monumentGeometry() {
-
-	const m = new THREE.Matrix4();
-	const stone = 0xc9c2b4, dark = 0x8e877a;
-	return coloredGeometry( [
-		{ geometry: new THREE.CylinderGeometry( 6.5, 7, 0.4, 8, 1 ), color: dark, matrix: m.clone().makeTranslation( 0, 0.2, 0 ) },
-		{ geometry: new THREE.CylinderGeometry( 5.2, 5.5, 0.5, 8, 1 ), color: stone, matrix: m.clone().makeTranslation( 0, 0.65, 0 ) },
-		{ geometry: new THREE.CylinderGeometry( 1.0, 1.4, 1.2, 4, 1 ), color: dark, matrix: m.clone().makeTranslation( 0, 1.5, 0 ) },
-		{ geometry: new THREE.CylinderGeometry( 0.25, 0.9, 9, 4, 1 ), color: stone, matrix: m.clone().makeTranslation( 0, 6.6, 0 ) },
-		{ geometry: new THREE.ConeGeometry( 0.35, 0.8, 4, 1 ), color: 0xd8b84a, matrix: m.clone().makeTranslation( 0, 11.5, 0 ) }
-	] );
-
-}
+// Re-exported so existing importers (e.g. physics.js) keep importing from './world.js'.
+export { SHADING_KINDS, makeMaterial } from './world/materials.js';
 
 export class World {
 
@@ -297,41 +207,13 @@ export class World {
 	// --- materials -----------------------------------------------------------
 	_groundColorNode() {
 
-		const u = this.u;
-		return Fn( () => {
-
-			const p = positionWorld.xz;
-			const base = vec3( 0.18, 0.17, 0.15 );
-			if ( ! this.groundDetail ) return base;
-			const tile = p.div( 2.5 );
-			const cell = floor( tile );
-			const f = fract( tile );
-			// Anti-aliased grout: line width measured in screen pixels via fwidth(),
-			// faded out once tiles are only a few pixels wide (avoids moiré).
-			const fw = fwidth( tile ).x.max( 1e-4 );
-			const edge = min( min( f.x, float( 1 ).sub( f.x ) ), min( f.y, float( 1 ).sub( f.y ) ) );
-			const grout = smoothstep( fw.mul( 0.5 ), fw.mul( 1.5 ).add( 0.015 ), edge );
-			const groutFade = smoothstep( 0.25, 0.08, fw );
-			const n = hash2( cell );
-			const stone = mix( vec3( 0.58, 0.55, 0.5 ), vec3( 0.68, 0.64, 0.57 ), n );
-			// wide paving rings every 24 m for a plaza feel
-			const r = length( p );
-			const ringD = abs( fract( r.div( 24 ) ).sub( 0.5 ) ).mul( 24 );
-			const ring = smoothstep( 10.6, 11.4, ringD );
-			const col = mix( stone, vec3( 0.5, 0.46, 0.42 ), ring.mul( 0.7 ) );
-			const withGrout = mix( col, vec3( 0.4, 0.38, 0.35 ), float( 1 ).sub( grout ).mul( groutFade ) );
-			// darker when "wet" (used with SSR); authored in sRGB -> linear
-			return pow( mix( withGrout, withGrout.mul( 0.5 ), u.groundWet ), vec3( 2.2 ) );
-
-		} )();
+		return groundColorNode( this );
 
 	}
 
 	_propMaterial() {
 
-		const mat = makeMaterial( this.kind, { vertexColors: true } );
-		mat.name = 'Prop_' + this.kind;
-		return mat;
+		return propMaterial( this.kind );
 
 	}
 
@@ -385,63 +267,13 @@ export class World {
 
 	setShadows( mode ) {
 
-		// mode: off | low | medium | high | ultra
-		const cfg = {
-			off: null,
-			low: { size: 1024, type: THREE.BasicShadowMap, radius: 1 },
-			medium: { size: 2048, type: THREE.PCFShadowMap, radius: 2 },
-			high: { size: 4096, type: THREE.PCFShadowMap, radius: 4 }, // r186 folded PCFSoft into PCF + radius
-			vsm: { size: 2048, type: THREE.VSMShadowMap, radius: 6 }
-		}[ mode ];
-
-		this.shadowsOn = !! cfg;
-		this.renderer.shadowMap.enabled = this.shadowsOn;
-		this.sun.castShadow = this.shadowsOn;
-		if ( cfg ) {
-
-			this.renderer.shadowMap.type = cfg.type;
-			if ( this.sun.shadow.mapSize.x !== cfg.size ) {
-
-				this.sun.shadow.mapSize.set( cfg.size, cfg.size );
-				if ( this.sun.shadow.map ) {
-
-					this.sun.shadow.map.dispose();
-					this.sun.shadow.map = null;
-
-				}
-
-			}
-
-			this.sun.shadow.radius = cfg.radius;
-			this.sun.shadow.blurSamples = 8;
-
-		}
-
-		this._applyShadowFlags();
+		applyShadowMode( this, mode );
 
 	}
 
-	// Shadow filter type / map size are baked into the lighting shaders; replacing the
-	// light is the simplest way to guarantee every material picks up the change.
 	recreateSun() {
 
-		const old = this.sun;
-		const sun = new THREE.DirectionalLight( old.color, old.intensity );
-		sun.name = 'Sun';
-		sun.castShadow = old.castShadow;
-		sun.shadow.mapSize.copy( old.shadow.mapSize );
-		sun.shadow.radius = old.shadow.radius;
-		sun.shadow.blurSamples = old.shadow.blurSamples;
-		sun.shadow.bias = old.shadow.bias;
-		sun.shadow.normalBias = old.shadow.normalBias;
-		sun.shadow.camera.near = 1;
-		sun.shadow.camera.far = 600;
-		sun.position.copy( old.position );
-		sun.target.position.copy( old.target.position );
-		this.scene.remove( old, old.target );
-		old.dispose();
-		this.scene.add( sun, sun.target );
-		this.sun = sun;
+		replaceSun( this );
 
 	}
 
@@ -460,123 +292,33 @@ export class World {
 
 	setPointLights( n ) {
 
-		for ( const l of this.pointLights ) this.scene.remove( l );
-		this.pointLights = [];
-		const palette = [ 0xffc27a, 0xffb060, 0xffe0a0, 0xff9e6b ];
-		for ( let i = 0; i < n; i ++ ) {
-
-			const l = new THREE.PointLight( palette[ i % palette.length ], 60, 16, 2 );
-			l.name = 'Lamp light ' + i;
-			this.scene.add( l );
-			this.pointLights.push( l );
-
-		}
-
-		this._lightTimer = 0;
+		rebuildPointLights( this, n );
 
 	}
 
 	// --- sky / environment / fog ----------------------------------------------
 	setSky( mode ) {
 
-		this.skyMode = mode;
-		const scene = this.scene;
-		scene.background = null;
-		scene.backgroundNode = null;
-		if ( this.skyMesh ) {
-
-			scene.remove( this.skyMesh );
-			this.skyMesh.material.dispose();
-			this.skyMesh = null;
-
-		}
-
-		if ( mode === 'gradient' ) {
-
-			const d = positionWorldDirection;
-			const t = clamp( d.y.mul( 1.4 ).add( 0.1 ), 0, 1 );
-			const sunGlow = pow( max( dot( d, vec3( this.sunDir.x, this.sunDir.y, this.sunDir.z ) ), 0 ), 64 ).mul( 1.5 );
-			scene.backgroundNode = mix( vec3( 0.78, 0.84, 0.88 ), vec3( 0.25, 0.45, 0.78 ), t ).add( vec3( 1, 0.9, 0.7 ).mul( sunGlow ) );
-
-		} else if ( mode === 'physical' ) {
-
-			const sky = new SkyMesh();
-			sky.scale.setScalar( 4500 );
-			sky.sunPosition.value.copy( this.sunDir );
-			sky.turbidity.value = 4;
-			sky.rayleigh.value = 1.2;
-			sky.frustumCulled = false;
-			scene.add( sky );
-			this.skyMesh = sky;
-			scene.background = new THREE.Color( 0x9fb3c2 );
-
-		} else {
-
-			scene.background = new THREE.Color( 0x9fb3c2 );
-
-		}
+		applySky( this, mode );
 
 	}
 
 	setEnvironment( on ) {
 
-		if ( on && ! this.envTexture ) {
-
-			const pmrem = new THREE.PMREMGenerator( this.renderer );
-			const env = new RoomEnvironment();
-			this.envTexture = pmrem.fromScene( env, 0.04 ).texture;
-			env.dispose();
-			pmrem.dispose();
-
-		}
-
-		this.scene.environment = on ? this.envTexture : null;
-		this.scene.environmentIntensity = 0.4;
+		applyEnvironment( this, on );
 
 	}
 
 	setFog( mode ) {
 
-		const u = this.u;
-		const fogColor = color( 0xb4c3cf );
-		if ( mode === 'distance' ) {
-
-			// Distance from the player/camera focus rather than from the camera itself,
-			// so it behaves the same in orthographic (isometric) and perspective views.
-			const d = length( positionWorld.sub( u.fogCenter ) );
-			this.scene.fogNode = fog( fogColor, smoothstep( u.fogNear, u.fogFar, d ) );
-
-		} else if ( mode === 'height' ) {
-
-			this.scene.fogNode = fog( color( 0xc9d4dc ), exponentialHeightFogFactor( u.fogDensity.mul( 0.2 ), u.fogHeight ) );
-
-		} else {
-
-			this.scene.fogNode = null;
-
-		}
+		applyFog( this, mode );
 
 	}
 
 	// --- per frame -----------------------------------------------------------
 	update( dt, focus, camera, viewExtent ) {
 
-		// Sun + shadow camera follow the focus point so the shadow map only covers
-		// what is on screen (a single directional shadow over a 1 km crowd would be
-		// hopelessly blurry).
-		const ext = Math.min( Math.max( viewExtent, 12 ), 400 );
-		const sc = this.sun.shadow.camera;
-		const size = this.sun.shadow.mapSize.x;
-		const texel = ( 2 * ext ) / size;
-		const snapped = new THREE.Vector3(
-			Math.round( focus.x / texel ) * texel, 0, Math.round( focus.z / texel ) * texel );
-		this.sun.target.position.copy( snapped );
-		this.sun.position.copy( snapped ).addScaledVector( this.sunDir, 250 );
-		sc.left = sc.bottom = - ext;
-		sc.right = sc.top = ext;
-		sc.near = 1;
-		sc.far = 600;
-		sc.updateProjectionMatrix();
+		updateSun( this, focus, viewExtent );
 
 		const u = this.u;
 		if ( camera.isPerspectiveCamera ) u.fogCenter.value.copy( camera.position );
@@ -586,38 +328,7 @@ export class World {
 
 		if ( this.skyMesh ) this.skyMesh.position.copy( camera.position );
 
-		// Assign the point-light pool to the lamp posts nearest the focus.
-		if ( this.pointLights.length ) {
-
-			this._lightTimer -= dt;
-			if ( this._lightTimer <= 0 ) {
-
-				this._lightTimer = 0.3;
-				const f = focus;
-				const near = this.lampPositions
-					.slice( 0, Math.min( this.lampPositions.length, this.lamps ? this.lamps.count : 0 ) )
-					.map( ( p ) => ( { p, d: ( p.x - f.x ) ** 2 + ( p.z - f.z ) ** 2 } ) )
-					.sort( ( a, b ) => a.d - b.d );
-				this.pointLights.forEach( ( l, i ) => {
-
-					if ( i < near.length ) {
-
-						l.position.copy( near[ i ].p );
-						l.visible = true;
-
-					} else {
-
-						// not enough lamps: orbit the focus instead
-						const a = ( i / this.pointLights.length ) * Math.PI * 2;
-						l.position.set( f.x + Math.cos( a ) * 12, 3, f.z + Math.sin( a ) * 12 );
-
-					}
-
-				} );
-
-			}
-
-		}
+		updatePointLights( this, dt, focus );
 
 	}
 
