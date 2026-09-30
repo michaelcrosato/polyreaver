@@ -12,6 +12,7 @@ import { isCel, makeCelMaterial } from './cel.js';
 import { defaults, PRESETS, CAPACITIES } from './features.js';
 import { UI, Graph } from './ui.js';
 import { Bench } from './bench.js';
+import { ClaudeLink } from './bridge.js';
 import { IS_MOBILE, DPR, CROWD_KEYS, SHADING_KEYS, WORLD_KEYS, RES_KEYS, POST_KEYS, PHYS_KEYS, fatal, readHash } from './app/config.js';
 import { applyCrowd, applyShading, applyWorld, applyCamera, applyPost, applyPhysics } from './app/apply.js';
 import { updateHero } from './app/hero.js';
@@ -83,8 +84,10 @@ class App {
 		this.stats = { frames: 0, acc: 0, cpu: 0, last: performance.now(), fps: 0, frameMs: 0, cpuMs: 0, gpuRender: 0, gpuCompute: 0 };
 		this._lastFrame = performance.now();
 		this._startTime = performance.now();
+		this.link = new ClaudeLink( this );
 		renderer.setAnimationLoop( () => this.frame() );
 		window.app = this;
+		this.link.start().catch( ( e ) => console.warn( 'Claude link unavailable', e ) );
 
 	}
 
@@ -356,6 +359,7 @@ class App {
 
 		if ( this.post.active ) this.post.render();
 		else this.renderer.render( this.scene, cam );
+		this.link.afterRender();
 
 		const cpuMs = performance.now() - now;
 
