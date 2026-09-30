@@ -100,7 +100,7 @@ The tab has to stay in the foreground while a command runs: browsers pause backg
 (flat shading comes from screen-space derivatives). Every vertex stores its body part, the joint it
 pivots around, and two bone weights for skeletal skinning.
 
-**Simulation** (`src/crowd/crowd.js`) is one compute shader per frame. Each agent picks an
+**Simulation** (`src/crowd/sim.js`) is one compute shader per frame. Each agent picks an
 activity (idle, walk, run, wave, cheer, dance, talk, plus "knocked" when physics hits it), walks to
 random targets near its "home" on a sunflower spiral (so the crowd grows outward as the count
 rises), and writes a packed `vec4` (`x, animPhase, z, state + heading + colourSeed`) plus a second
@@ -134,7 +134,7 @@ and the CPU VAT baker, so they all show identical motion.
 
 The hero is agent #0: same buffers and shader, driven by uniforms instead of AI.
 
-### Physics (`src/physics.js`, `src/crowd/collide.js`)
+### Physics (`src/physics.js` + `src/physics/`, `src/crowd/collide.js`)
 
 With **Enable physics** on, everything collides:
 
@@ -313,23 +313,31 @@ fast: the software GPU is a CPU rasteriser.
 ## Project layout
 
 ```
-index.html            UI shell + styles (Vite entry)
-src/main.js           app wiring: settings, frame loop, hero, HUD, report
-src/gpu.js            WebGPU device creation (real hardware limits, no fallback)
-src/crowd/models.js   procedural low-poly character tiers (+ skin weights)
-src/crowd/crowd.js    compute simulation, direct + GPU-driven paths, physics coupling
-src/crowd/anim.js     the five animation systems (procedural, keyframe, skeletal, VAT)
-src/crowd/clips.js    hand-keyed animation clips + CPU pose chain (VAT baking)
-src/crowd/collide.js  GPU spatial-hash crowd collisions
-src/world.js          plaza, props, lights, shadows, sky, fog, environment
-src/camera.js         isometric / top / orbit / chase / eye-level camera rig + input
-src/post.js           post-processing graph (RenderPipeline + TSL nodes)
-src/physics.js        Rapier 0.19.3 world, bodies, props, hero controller, crowd coupling
-src/cel.js            Wind Waker / Jet Set Radio cel-shading lighting model
-src/features.js       every setting with its cost and teaching note (drives the UI)
-src/bench.js          max-crowd and effect-cost benchmarks
-src/ui.js, input.js   settings panel, HUD graph, keyboard / touch controls
-scripts/              post-build copy + README table generator
+index.html              UI shell + styles (Vite entry)
+src/main.js             App: settings -> subsystems, frame loop (entry module)
+src/app/                config + key groups, settings appliers, hero, HUD/report, buttons/hotkeys
+src/gpu.js              WebGPU device creation (real hardware limits, no fallback)
+src/crowd/crowd.js      Crowd class: lifecycle, settings, per-frame compute order, stats
+src/crowd/sim.js        compute kernels: init, simulation/AI, skeletal bones, physics proxies
+src/crowd/cull.js       GPU-driven path: frustum + screen-size LOD cull, indirect draws
+src/crowd/materials.js  crowd vertex shader per animation system, materials, meshes
+src/crowd/anim.js       the five animation systems (procedural, keyframe, skeletal, VAT)
+src/crowd/clips.js      hand-keyed animation clips + CPU pose chain (VAT baking)
+src/crowd/models.js     procedural low-poly character tiers (+ skin weights)
+src/crowd/collide.js    GPU spatial-hash crowd collisions
+src/world.js            World: plaza, props, settings entry points
+src/world/              prop geometry, shading models + ground, lights/shadows/sky/fog
+src/physics.js          PhysicsDemo: Rapier world lifecycle, hero controller, per-step order
+src/physics/            bodies + spawn patterns, crowd coupling, prop colliders, debug draw
+src/camera.js           isometric / top / orbit / chase / eye-level camera rig + input
+src/post.js             post-processing graph (RenderPipeline + TSL nodes)
+src/cel.js              Wind Waker / Jet Set Radio cel-shading lighting model
+src/features.js         every setting with its cost and teaching note (drives the UI)
+src/bench.js            max-crowd, effect-cost and steady-state benchmarks
+src/bridge.js           Claude link (artifact database command runner)
+src/ui.js, input.js     settings panel, HUD graph, keyboard / touch controls
+scripts/                post-build copy, README table generator, smoke test
+.github/workflows/      Build (every push) and Smoke test (nightly / on demand)
 ```
 
 ## Notes and limits
