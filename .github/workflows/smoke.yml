@@ -1,0 +1,47 @@
+# Full headless smoke test (every preset, animation system, stylize mode and
+# physics action, plus the Claude link) in Chromium's software GPU. It takes
+# several minutes, so it runs nightly - only if something was pushed that day -
+# and on demand from the Actions tab ("Run workflow").
+name: Smoke test
+
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - name: Skip the nightly run if nothing changed in the last day
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ -z "$(git log --since='26 hours ago' --format=%h)" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No commits in the last day - skipping."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.changed.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.changed.outputs.run == 'true'
+        run: npm ci
+      - if: steps.changed.outputs.run == 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.changed.outputs.run == 'true'
+        run: npm run build
+      - if: steps.changed.outputs.run == 'true'
+        run: npm run smoke -- --shots smoke-shots
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.changed.outputs.run == 'true'
+        with:
+          name: smoke-screenshots
+          path: smoke-shots/
+          retention-days: 14

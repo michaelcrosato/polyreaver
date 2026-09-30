@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 
 export default [
-	{ ignores: [ 'dist/', 'node_modules/', 'webgpu-crowd-stress.html' ] },
+	{ ignores: [ 'dist/', 'node_modules/', '.claude/', 'webgpu-crowd-stress.html' ] },
 	js.configs.recommended,
 	{
 		languageOptions: {

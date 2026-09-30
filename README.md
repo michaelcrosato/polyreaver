@@ -67,6 +67,31 @@ Reading the HUD:
   Turn on Rapier to see what CPU-side simulation looks like.
 * **triangles/frame** counts every pass (a shadow pass or outline pass re-draws the crowd).
 
+## Claude link (remote benchmarking)
+
+When the page is opened as a **claude.ai artifact**, it can talk to Claude through the artifact's
+small shared database. A pill in the corner says `Claude link: linked`. Claude can then queue
+commands for your device, and the page runs them and writes the results back, without you
+copying anything:
+
+| Command | What it does |
+|---|---|
+| `ping` | GPU / browser / screen info and the settings you changed |
+| `preset` `{id}` · `set` `{values}` · `reset` | change settings (keys and value types are checked against the feature list) |
+| `measure` `{seconds}` | steady-state fps, median / p95 / p99 / worst frame time, GPU ms, triangles, draw calls |
+| `maxCrowd` `{targetFps}` · `effects` | the two built-in benchmarks |
+| `screenshot` | the current frame, stored as an artifact asset |
+| `report` · `settings` | the same text as *Copy report*, or the full settings object |
+| `sequence` `{steps: [...]}` | run several of the above in order |
+
+Benchmarks you start yourself from the panel are recorded as well (`runs/`). Commands live in
+`commands/<id>` with `status: "pending"`, results in `results/<id>`. Only people with edit access
+can queue commands, if several devices have the page open a command is claimed by exactly one of
+them (or by the one named in its `device` field), and nothing from the database is ever run as
+code. Outside claude.ai (dev server, the HTML file from disk) the link is simply off.
+
+The tab has to stay in the foreground while a command runs: browsers pause background tabs.
+
 ## What's inside
 
 **Characters** (`src/crowd/models.js`) are built procedurally from convex primitives in four tiers:
@@ -270,6 +295,20 @@ animation) and *Physics playground* (Rapier bodies raining on a colliding crowd)
 * **GPU vs Rapier crowd collisions**: GPU handles every agent for a few milliseconds of compute;
   Rapier handles a few thousand with exact two-way contacts but costs CPU time and a round trip.
 * **Pixel filters** often make the frame *cheaper*, because the scene really renders at 144-240 lines.
+
+## Development
+
+| Command | What |
+|---|---|
+| `npm run dev` | dev server with hot reload |
+| `npm run lint` | ESLint (catches undefined names, unused code) |
+| `npm run build` | single-file build → `dist/index.html` + `webgpu-crowd-stress.html` |
+| `npm run smoke` | after a build: headless Chromium with a software GPU walks every preset, animation system, stylize mode and physics action, and checks the Claude link against a fake database. Fails on any page or WebGPU error. `--quick` for a 1-2 minute version, `--shots dir/` saves screenshots. |
+
+GitHub runs two automatic jobs (*Actions* tab): **Build** (lint + build on every push, the built
+HTML is downloadable from the run) and **Smoke test** (the full smoke test, nightly if something
+was pushed that day, or on demand with *Run workflow*). The smoke test proves things run, not how
+fast: the software GPU is a CPU rasteriser.
 
 ## Project layout
 

@@ -70,6 +70,7 @@ export class Bench {
 		this.samples = [];
 		this.gpuSamples = [];
 		this.results = { crowd: null, fx: null };
+		this.onResult = null; // ( kind, data ) => {} - set by the Claude link
 
 	}
 
@@ -130,6 +131,27 @@ export class Bench {
 
 	}
 
+	// One steady-state measurement of the current settings, with frame-time
+	// percentiles (p95/p99 show hitches that a median hides).
+	async sample( sampleMs = 3000 ) {
+
+		if ( this.running ) throw new Error( 'a benchmark is already running' );
+		this.running = true;
+		try {
+
+			const m = await this._measure( 800, sampleMs );
+			const s = [ ...this.samples ].sort( ( a, b ) => a - b );
+			const pct = ( q ) => s[ Math.min( s.length - 1, Math.floor( q * s.length ) ) ];
+			return { ...m, p95: pct( 0.95 ), p99: pct( 0.99 ), worst: s[ s.length - 1 ] };
+
+		} finally {
+
+			this.running = false;
+
+		}
+
+	}
+
 	async findMaxCrowd( targetFps ) {
 
 		if ( this.running ) return;
@@ -181,6 +203,7 @@ export class Bench {
 
 			const tris = good * app.crowd.models[ app.S.tier ].triangles;
 			this.results.crowd = { targetFps, maxAgents: good, trianglesPerFrame: tris, model: app.crowd.models[ app.S.tier ].id, path: app.S.path, log: log.slice() };
+			this.onResult?.( 'maxCrowd', this.results.crowd );
 			app.set( 'count', good || original );
 			out( `<br><b>Result: ${formatCount( good )} agents</b> (~${formatCount( tris )} crowd triangles) hold ${targetFps} fps${good >= app.maxCapacity ? ' (hit the buffer capacity - raise "Max crowd")' : ''}.` );
 
@@ -238,6 +261,7 @@ export class Bench {
 			}
 
 			this.results.fx = rows.map( ( r ) => ( { ...r } ) );
+			this.onResult?.( 'effects', { agents: app.S.count, rows: this.results.fx } );
 			render( '<br>done. Deltas are noisy on vsync-limited frames; GPU timestamps (when available) are more reliable.' );
 
 		} catch {

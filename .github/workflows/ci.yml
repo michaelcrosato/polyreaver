@@ -1,0 +1,32 @@
+# Runs on every push: lint + build (about a minute). The built single-file HTML
+# is attached to the run so it can be downloaded from the Actions tab.
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Check the committed single-file build is current
+        run: |
+          if ! git diff --quiet -- webgpu-crowd-stress.html; then
+            echo "::warning file=webgpu-crowd-stress.html::The committed webgpu-crowd-stress.html is older than the source. Run npm run build and commit it."
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webgpu-crowd-stress
+          path: webgpu-crowd-stress.html
+          retention-days: 30
