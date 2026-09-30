@@ -1,8 +1,7 @@
 // WebGPU crowd stress test - application wiring.
 
 import * as THREE from 'three/webgpu';
-import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
-import { createDevice, describeAdapter } from './gpu.js';
+import { createDevice } from './gpu.js';
 import { Crowd } from './crowd/crowd.js';
 import { World } from './world.js';
 import { CameraRig } from './camera.js';
@@ -10,59 +9,14 @@ import { Input } from './input.js';
 import { PostFX, needsPost } from './post.js';
 import { PhysicsDemo } from './physics.js';
 import { isCel, makeCelMaterial } from './cel.js';
-import { defaults, PRESETS, CAPACITIES, findItem, formatCount } from './features.js';
+import { defaults, PRESETS, CAPACITIES } from './features.js';
 import { UI, Graph } from './ui.js';
 import { Bench } from './bench.js';
-
-const TONE = {
-	none: THREE.NoToneMapping, linear: THREE.LinearToneMapping, reinhard: THREE.ReinhardToneMapping,
-	cineon: THREE.CineonToneMapping, aces: THREE.ACESFilmicToneMapping, agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping
-};
-
-const IS_MOBILE = matchMedia( '(pointer: coarse)' ).matches || /Android|iPhone|iPad/i.test( navigator.userAgent );
-const DPR = window.devicePixelRatio || 1;
-
-const CROWD_KEYS = new Set( [ 'count', 'capacity', 'tier', 'path', 'lod', 'anim', 'animBlend', 'behaviour', 'density', 'activity', 'speed', 'outlines', 'outlineWidth', 'rim', 'blobShadows', 'crowdShadows' ] );
-const SHADING_KEYS = new Set( [ 'shading', 'hemi', 'env', 'shadows', 'pointLights', 'clustered' ] );
-const WORLD_KEYS = new Set( [ 'sky', 'fog', 'props', 'groundDetail' ] );
-const RES_KEYS = new Set( [ 'maxDpr', 'renderScale', 'upscaler' ] );
-const POST_KEYS = new Set( [ 'aa', 'toneMapping', 'exposure', 'ao', 'bloom', 'dof', 'motionBlur', 'ssr', 'ssgi', 'grading', 'vignette', 'grain', 'chromatic', 'sharpen', 'stylize' ] );
-const PHYS_KEYS = new Set( [ 'physics', 'crowdMode', 'rapierAgents', 'agentRadius', 'proxies', 'proxyCount', 'knockdown', 'physProps', 'propsDynamic', 'bodies', 'shape', 'sizeVar', 'spawn', 'restitution', 'friction', 'gravity', 'hz', 'iterations', 'ccd', 'sleep', 'recycle', 'physDebug' ] );
-
-function fatal( title, detail ) {
-
-	const el = document.getElementById( 'fatal' );
-	el.querySelector( 'h2' ).textContent = title;
-	el.querySelector( '.detail' ).textContent = detail;
-	el.style.display = 'flex';
-	document.title = 'DONE';
-	window.__fatal = title + ': ' + detail;
-
-}
-
-function readHash() {
-
-	const out = {};
-	const params = new URLSearchParams( location.hash.slice( 1 ) );
-	const base = defaults();
-	for ( const [ k, raw ] of params ) {
-
-		if ( k === 'preset' && PRESETS[ raw ] ) {
-
-			Object.assign( out, PRESETS[ raw ].values );
-			continue;
-
-		}
-
-		if ( ! ( k in base ) ) continue;
-		const d = base[ k ];
-		out[ k ] = typeof d === 'number' ? Number( raw ) : typeof d === 'boolean' ? raw === '1' || raw === 'true' : raw;
-
-	}
-
-	return out;
-
-}
+import { IS_MOBILE, DPR, CROWD_KEYS, SHADING_KEYS, WORLD_KEYS, RES_KEYS, POST_KEYS, PHYS_KEYS, fatal, readHash } from './app/config.js';
+import { applyCrowd, applyShading, applyWorld, applyCamera, applyPost, applyPhysics } from './app/apply.js';
+import { updateHero } from './app/hero.js';
+import { updateHud, buildReport } from './app/hud.js';
+import { bindButtons, hotkey } from './app/controls.js';
 
 class App {
 
@@ -216,122 +170,37 @@ class App {
 
 	_applyCrowd() {
 
-		const S = this.S, crowd = this.crowd;
-		// GPU-driven culling and GPU collisions bind up to 8 storage buffers per shader.
-		if ( this.storageLimit < 8 && S.path === 'gpu' ) {
-
-			S.path = 'direct';
-			this.ui.controls.get( 'path' )?.set( 'direct' );
-			this.ui.setWarnings( [ `This GPU allows only ${this.storageLimit} storage buffers per shader - GPU-driven rendering needs 8, using direct.` ] );
-
-		}
-
-		const cap = this.resolveCapacity();
-		if ( cap !== crowd.capacity ) crowd.setCapacity( cap );
-		const u = crowd.u;
-		u.density.value = S.density;
-		u.activity.value = S.activity;
-		u.speedScale.value = S.speed;
-		u.behaviour.value = Number( S.behaviour );
-		const shadowsOn = S.shadows !== 'off';
-		crowd.set( {
-			tier: Number( S.tier ), path: S.path, animSystem: S.anim, animBlend: S.animBlend, outlines: S.outlines, rim: S.rim,
-			blobShadows: S.blobShadows, lodEnabled: S.lod, materialKind: S.shading,
-			castShadow: shadowsOn && S.crowdShadows, receiveShadow: shadowsOn
-		} );
-		u.outline.value = S.outlineWidth;
-		crowd.setCount( S.count );
-		this.world.setRadius( crowd.radius );
+		applyCrowd( this );
 
 	}
 
 	_applyShading() {
 
-		const S = this.S, renderer = this.renderer, world = this.world;
-		const wantClustered = S.clustered;
-		const isClustered = renderer.lighting !== this.defaultLighting;
-		if ( wantClustered !== isClustered ) renderer.lighting = wantClustered ? new ClusteredLighting( 1024 ) : this.defaultLighting;
-
-		const key = `${S.shading}|${S.shadows}|${S.clustered}`;
-		if ( key !== this._shadingKey ) {
-
-			const shadowChanged = ! this._shadingKey || this._shadingKey.split( '|' )[ 1 ] !== S.shadows;
-			this._shadingKey = key;
-			world.setShadows( S.shadows );
-			if ( shadowChanged ) world.recreateSun();
-			world.setShading( S.shading );
-			this.physics.setShading( S.shading );
-			this.physics.setShadows( S.shadows !== 'off' );
-			this.crowd.materialKind = null; // force the crowd to rebuild its materials
-		}
-
-		world.setHemisphere( S.hemi );
-		world.setEnvironment( S.env );
-		if ( Number( S.pointLights ) !== world.pointLights.length ) world.setPointLights( Number( S.pointLights ) );
+		applyShading( this );
 
 	}
 
 	_applyWorld() {
 
-		const S = this.S, world = this.world;
-		if ( world.skyMode !== S.sky ) world.setSky( S.sky );
-		world.setFog( S.fog );
-		world.setProps( S.props );
-		if ( world.groundDetail !== S.groundDetail ) world.setGroundDetail( S.groundDetail );
+		applyWorld( this );
 
 	}
 
 	_applyCamera( rebuildPost = true ) {
 
-		if ( this.rig.mode !== this.S.camera ) this.rig.setMode( this.S.camera );
-		this.resize();
-		if ( rebuildPost ) this._applyPost();
+		applyCamera( this, rebuildPost );
 
 	}
 
 	_applyPost() {
 
-		const S = this.S, renderer = this.renderer;
-		renderer.toneMapping = TONE[ S.toneMapping ] ?? THREE.NoToneMapping;
-		renderer.toneMappingExposure = S.exposure;
-		// MSAA for the direct (no post) path lives on the renderer / canvas.
-		renderer._samples = ( S.aa === 'msaa' && ! needsPost( S ) ) ? 4 : 0;
-		this.world.setWet( S.ssr );
-		const warnings = this.post.build( S, this.rig.camera );
-		if ( S.ssr && ( S.shading !== 'standard' && S.shading !== 'physical' ) ) warnings.push( 'SSR needs Standard or Physical shading to reflect anything' );
-		if ( ( S.shading === 'unlit' ) && ( S.shadows !== 'off' || S.pointLights > 0 || S.env ) ) warnings.push( 'Unlit shading ignores lights, shadows and environment - pick a lit shading model' );
-		this.ui.setWarnings( warnings );
+		applyPost( this );
 
 	}
 
 	_applyPhysics() {
 
-		const S = this.S, physics = this.physics;
-		if ( this.storageLimit < 8 && S.crowdMode !== 'off' ) {
-
-			S.crowdMode = 'off';
-			this.ui.controls.get( 'crowdMode' )?.set( 'off' );
-			this.ui.setWarnings( [ `This GPU allows only ${this.storageLimit} storage buffers per shader - GPU crowd collisions need 8, so they are off.` ] );
-
-		}
-
-		physics.configure( {
-			bodies: Number( S.bodies ), shape: S.shape, sizeVar: S.sizeVar, spawn: S.spawn, restitution: S.restitution,
-			friction: S.friction, gravity: S.gravity, hz: Number( S.hz ), iterations: Number( S.iterations ), ccd: S.ccd,
-			sleep: S.sleep, recycle: S.recycle, props: S.physProps, propsDynamic: S.propsDynamic, crowdMode: S.crowdMode, rapierAgents: Number( S.rapierAgents ),
-			proxies: S.proxies, proxyCount: Number( S.proxyCount ), agentRadius: S.agentRadius, knockdown: S.knockdown, debug: S.physDebug
-		} );
-		if ( S.physics && ! physics.enabled ) {
-
-			physics.heroHeading = this.hero.heading;
-			physics.enable( this.hero.pos ).then( () => physics.setShadows( S.shadows !== 'off' ) ).catch( ( e ) => {
-
-				console.error( e );
-				this.ui.setWarnings( [ 'Rapier failed to load: ' + e.message ] );
-
-			} );
-
-		} else if ( ! S.physics && physics.enabled ) physics.disable();
+		applyPhysics( this );
 
 	}
 
@@ -352,50 +221,13 @@ class App {
 	// --- input -----------------------------------------------------------------
 	_bindButtons() {
 
-		for ( const btn of document.querySelectorAll( '[data-action]' ) ) {
-
-			const a = btn.dataset.action;
-			if ( a === 'run' ) {
-
-				btn.addEventListener( 'click', () => {
-
-					this.input.run = ! this.input.run;
-					btn.classList.toggle( 'on', this.input.run );
-
-				} );
-
-			} else if ( [ 'wave', 'cheer', 'dance' ].includes( a ) ) {
-
-				const on = ( e ) => {
-
-					e.preventDefault();
-					this.input.action = a;
-
-				};
-
-				const off = () => ( this.input.action = null );
-				btn.addEventListener( 'pointerdown', on );
-				btn.addEventListener( 'pointerup', off );
-				btn.addEventListener( 'pointerleave', off );
-				btn.addEventListener( 'pointercancel', off );
-
-			} else {
-
-				btn.addEventListener( 'click', () => this.action( a ) );
-
-			}
-
-		}
+		bindButtons( this );
 
 	}
 
 	_hotkey( e ) {
 
-		const map = { KeyQ: 'rotL', KeyE: 'rotR', KeyC: 'recenter', KeyH: 'hideUI', KeyP: 'panel', Equal: 'zoomIn', Minus: 'zoomOut', KeyX: 'explode' };
-		if ( map[ e.code ] ) this.action( map[ e.code ] );
-		const modes = [ 'iso', 'top', 'orbit', 'chase', 'eye' ];
-		const n = parseInt( e.key );
-		if ( n >= 1 && n <= 5 ) this.set( 'camera', modes[ n - 1 ] );
+		hotkey( this, e );
 
 	}
 
@@ -466,95 +298,14 @@ class App {
 
 	report() {
 
-		const g = this.gpu, s = this.stats, S = this.S;
-		const base = defaults();
-		const changed = Object.entries( S ).filter( ( [ k, v ] ) => base[ k ] !== v ).map( ( [ k, v ] ) => `  ${findItem( k )?.label || k}: ${v}` );
-		const lines = [
-			'WebGPU Crowd Stress Test - report',
-			new Date().toISOString(),
-			'',
-			'GPU: ' + describeAdapter( g.info ),
-			`WebGPU feature level: ${g.featureLevel} · timestamps: ${g.timestamps ? 'yes' : 'no'} · three.js r${THREE.REVISION}`,
-			`Limits: maxStorageBufferBindingSize ${( g.limits.maxStorageBufferBindingSize / 1048576 ).toFixed( 0 )} MB, storage buffers in vertex stage ${g.limits.maxStorageBuffersInVertexStage ?? 'n/a'}`,
-			'Browser: ' + navigator.userAgent,
-			`Screen: ${innerWidth}x${innerHeight} CSS px @ DPR ${DPR} -> rendering ${this.renderer.domElement.width}x${this.renderer.domElement.height}`,
-			'',
-			`Now: ${s.fps.toFixed( 1 )} fps · frame ${s.frameMs.toFixed( 2 )} ms · CPU ${s.cpuMs.toFixed( 2 )} ms` + ( g.timestamps ? ` · GPU ${( s.gpuRender + s.gpuCompute ).toFixed( 2 )} ms` : '' ),
-			`Agents: ${S.count} · model ${this.crowd.models[ S.tier ].id} (${this.crowd.models[ S.tier ].triangles} tris) · path ${S.path}`,
-			`Triangles/frame (all passes): ${formatCount( this._tris || 0 )}`,
-			'',
-			'Settings changed from default:',
-			...( changed.length ? changed : [ '  (none - bare baseline)' ] )
-		];
-		const r = this.bench.results;
-		if ( r.crowd ) {
-
-			lines.push( '', `Max crowd @ ${r.crowd.targetFps} fps: ${r.crowd.maxAgents} agents (~${formatCount( r.crowd.trianglesPerFrame )} crowd tris), model ${r.crowd.model}, path ${r.crowd.path}` );
-			lines.push( ...r.crowd.log.map( ( l ) => '  ' + l ) );
-
-		}
-
-		if ( r.fx ) {
-
-			lines.push( '', 'Effect costs (GPU ms delta where available, else frame ms delta):' );
-			for ( const row of [ ...r.fx ].sort( ( a, b ) => ( b.gpuDelta ?? b.frameDelta ) - ( a.gpuDelta ?? a.frameDelta ) ) ) {
-
-				const d = row.gpuDelta ?? row.frameDelta;
-				lines.push( `  ${row.label.padEnd( 34 )} ${( d >= 0 ? '+' : '' ) + d.toFixed( 2 )} ms  (${row.fps.toFixed( 0 )} fps)` );
-
-			}
-
-		}
-
-		lines.push( '', 'Settings link: ' + this.shareLink() );
-		return lines.join( '\n' );
+		return buildReport( this );
 
 	}
 
 	// --- frame -----------------------------------------------------------------
 	_updateHero( dt ) {
 
-		const hero = this.hero;
-		const inp = this.input.read();
-		const fwd = new THREE.Vector3(), right = new THREE.Vector3();
-		this.rig.groundBasis( fwd, right );
-		const move = right.multiplyScalar( inp.x ).add( fwd.multiplyScalar( inp.y ) );
-		const mag = Math.min( move.length(), 1 );
-		if ( mag > 0.08 ) {
-
-			const target = Math.atan2( move.x, move.z );
-			let d = target - hero.heading;
-			d = Math.atan2( Math.sin( d ), Math.cos( d ) );
-			hero.heading += d * Math.min( 1, dt * 12 );
-			hero.speed = ( inp.run ? 4.5 : 1.7 ) * mag;
-			hero.state = inp.run ? 2 : 1;
-			const delta = { x: Math.sin( hero.heading ) * hero.speed * dt, z: Math.cos( hero.heading ) * hero.speed * dt };
-			// With physics on, the hero is a Rapier character controller: it slides
-			// along trees / the monument and shoves bodies instead of passing through.
-			if ( ! this.physics.moveHero( hero.pos, delta ) ) {
-
-				hero.pos.x += delta.x;
-				hero.pos.z += delta.z;
-
-			}
-			const r = Math.hypot( hero.pos.x, hero.pos.z ), maxR = this.world.radius + 40;
-			if ( r > maxR ) hero.pos.multiplyScalar( maxR / r );
-			this.rig.follow = true;
-			this.rig.panOffset.multiplyScalar( Math.max( 0, 1 - dt * 3 ) );
-
-		} else {
-
-			hero.speed = 0;
-			hero.state = inp.action === 'wave' ? 3 : inp.action === 'cheer' ? 4 : inp.action === 'dance' ? 5 : 0;
-
-		}
-
-		const u = this.crowd.u;
-		u.heroPos.value.set( hero.pos.x, hero.pos.z );
-		u.heroHeading.value = ( ( hero.heading % ( Math.PI * 2 ) ) + Math.PI * 2 ) % ( Math.PI * 2 );
-		u.heroState.value = hero.state;
-		u.heroSpeed.value = hero.speed;
-		this.heroRing.position.set( hero.pos.x, 0.04, hero.pos.z );
+		updateHero( this, dt );
 
 	}
 
@@ -642,45 +393,7 @@ class App {
 
 	_updateHud() {
 
-		const s = this.stats, S = this.S, g = this.gpu;
-		const cs = this.crowd.stats();
-		const shadowsOn = S.shadows !== 'off';
-		const castTris = shadowsOn && S.crowdShadows ? cs.instances * this.crowd.models[ S.tier ].triangles : 0;
-		const propTris = this.world.propTriangles * ( shadowsOn ? 2 : 1 );
-		const physTris = this.physics.triangles * ( shadowsOn ? 2 : 1 );
-		const tris = cs.tris + castTris + propTris + physTris;
-		this._tris = tris;
-		const info = this.renderer.info;
-		const w = this.renderer.domElement.width, hgt = this.renderer.domElement.height;
-		const fpsClass = s.fps >= 55 ? 'good' : s.fps >= 28 ? 'ok' : 'bad';
-		const gpuLine = g.timestamps
-			? `GPU <b>${( s.gpuRender + s.gpuCompute ).toFixed( 2 )}</b> ms <span class="dim">(render ${s.gpuRender.toFixed( 2 )} + compute ${s.gpuCompute.toFixed( 2 )})</span>`
-			: '<span class="dim">GPU timing unavailable (no timestamp-query)</span>';
-		const vis = S.path === 'gpu' ? ` · visible <b>${formatCount( cs.instances )}</b> <span class="dim">[${cs.visibleByTier.slice( 0, Number( S.tier ) + 1 ).map( formatCount ).join( '/' )}]</span>` : '';
-		let phys = '';
-		if ( this.physics.enabled && this.physics.ready ) {
-
-			const ps = this.physics.stats();
-			const crowdLine = S.crowdMode === 'gpu'
-				? `GPU crowd collisions${S.proxies ? ` · ${ps.proxies} proxies` : ''}`
-				: S.crowdMode === 'rapier' ? `${formatCount( ps.agents )} Rapier agents` : 'crowd collisions off';
-			phys = `<div>Rapier ${this.physics.version}: <b>${formatCount( ps.bodies )}</b> bodies · <b>${formatCount( ps.colliders )}</b> colliders · step <b>${ps.stepMs.toFixed( 2 )}</b> ms (${ps.steps}×) · sync ${ps.syncMs.toFixed( 2 )} ms</div>` +
-				`<div class="x">${crowdLine}${ps.readbackMs ? ` · GPU→CPU readback ${ps.readbackMs.toFixed( 1 )} ms` : ''}</div>`;
-
-		}
-
-		const animBytes = cs.animBytes ? ` · ${( cs.animBytes / 1048576 ).toFixed( cs.animBytes > 1048576 ? 0 : 2 )} MB` : '';
-		const animLine = `<div class="x">animation <b>${S.anim}</b>${animBytes}${S.anim === 'skeletal' && this.crowd.animSystem !== 'skeletal' ? ' (unsupported here, using keyframe)' : ''}${this.crowd.skeletalLimit < S.count ? ` · bones for first ${formatCount( this.crowd.skeletalLimit )}` : ''}</div>`;
-		this.ui.setHud(
-			`<div class="fps ${fpsClass}">${s.fps.toFixed( 0 )}<small> fps</small></div>` +
-			`<div>frame <b>${s.frameMs.toFixed( 1 )}</b> ms · CPU <b>${s.cpuMs.toFixed( 2 )}</b> ms</div>` +
-			`<div>${gpuLine}</div>` +
-			`<div>agents <b>${formatCount( S.count )}</b>${vis}</div>` +
-			`<div>triangles/frame <b>${formatCount( Math.round( tris ) )}</b> <span class="dim">(crowd ${formatCount( cs.tris + castTris )})</span></div>` +
-			`<div class="x">draw calls <b>${info.render.drawCalls}</b> · passes ${this.post.active ? this.post.passes : 1}${shadowsOn ? ' + shadow' : ''}</div>` +
-			`<div class="dim x">${w}×${hgt} px (${this.pixelRatio.toFixed( 2 )}x)</div>` +
-			animLine + phys +
-			`<div class="dim more">${describeAdapter( g.info )}<br>feature level ${g.featureLevel} · three r${THREE.REVISION} · capacity ${formatCount( this.crowd.capacity )}</div>` );
+		updateHud( this );
 
 	}
 
