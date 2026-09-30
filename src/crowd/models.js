@@ -15,9 +15,10 @@
 // screen-space derivatives, which is exactly the faceted Star Fox look we want
 // and saves 12 bytes per vertex.
 //
-// Animation is done in the vertex shader (see crowd.js) by rotating each part
-// around its pivot, so there is no skeleton, no skinning matrices and no
-// per-bone uniforms - just math on the part id.
+// Animation runs on the GPU (the five systems are in anim.js, wired into the
+// vertex shader in materials.js). The rigid-part systems rotate each part around
+// its pivot, so they need no skeleton, no skinning matrices and no per-bone
+// uniforms - just math on the part id. Only the skeletal system uses skinIdx/skinW.
 
 import * as THREE from 'three/webgpu';
 

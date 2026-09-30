@@ -244,7 +244,7 @@ function rotZAbout( p, c, a ) {
 }
 
 // Apply a pose to one rest-pose vertex of body part `part` (see models.js PART).
-// Mirrors poseChain() in crowd.js exactly.
+// Mirrors poseVertexDynamic() in anim.js exactly.
 export function poseVertexJS( v, part, jointA, jointB, pose ) {
 
 	const p = [ v[ 0 ], v[ 1 ], v[ 2 ] ];
