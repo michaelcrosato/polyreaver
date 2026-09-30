@@ -324,7 +324,7 @@ export class PostFX {
 		const px = floor( screenUV.mul( lowRes ) );
 		const threshold = bayer.element( int( px.y.mod( 4 ) ).mul( 4 ).add( int( px.x.mod( 4 ) ) ) );
 		const dither = threshold.sub( 0.5 );
-		let col = out.rgb;
+		let col;
 
 		if ( pix.palette && pix.palette.length > 4 ) {
 

@@ -1068,7 +1068,7 @@ export class Crowd {
 
 	stats() {
 
-		let tris = 0, instances = 0, draws = 0;
+		let tris = 0, instances = 0, draws;
 		const outlineMul = this.outlines ? 2 : 1;
 		if ( this.path === 'direct' ) {
 
