@@ -8,12 +8,20 @@ import {
 } from 'three/tsl';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { isCel, makeCelMaterial } from './cel.js';
 
-export const SHADING_KINDS = [ 'unlit', 'lambert', 'phong', 'standard', 'physical', 'toon' ];
+export const SHADING_KINDS = [ 'unlit', 'lambert', 'phong', 'standard', 'physical', 'toon', 'celWW', 'celJSR' ];
 
 export function makeMaterial( kind, params = {} ) {
 
 	const common = { ...params };
+	if ( isCel( kind ) ) {
+
+		delete common.metalness;
+		delete common.roughness;
+		return makeCelMaterial( kind, common );
+
+	}
 	switch ( kind ) {
 
 		case 'lambert': return new THREE.MeshLambertNodeMaterial( common );
@@ -261,6 +269,21 @@ export class World {
 		this.trees.count = within( this.treePts );
 		this.lamps.count = within( this.lampPts );
 		this.trees.visible = this.lamps.visible = this.monument.visible = this.propsOn;
+
+	}
+
+	// Put every tree / lamp back where it was generated (after physics knocked them over).
+	resetPropMatrices() {
+
+		const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
+		const up = new THREE.Vector3( 0, 1, 0 );
+		for ( const [ mesh, pts ] of [ [ this.trees, this.treePts ], [ this.lamps, this.lampPts ] ] ) {
+
+			if ( ! mesh ) continue;
+			pts.forEach( ( pt, i ) => mesh.setMatrixAt( i, m.compose( p.set( pt.x, 0, pt.z ), q.setFromAxisAngle( up, pt.rot ), sc.setScalar( pt.s ) ) ) );
+			mesh.instanceMatrix.needsUpdate = true;
+
+		}
 
 	}
 

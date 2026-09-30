@@ -111,6 +111,14 @@ export class UI {
 
 	_buildItem( item ) {
 
+		if ( item.type === 'actions' ) {
+
+			const row = h( 'div', { class: 'presets' } );
+			for ( const [ action, label ] of item.actions ) row.append( h( 'button', { class: 'chip', text: label, onclick: () => this.onAction( action ) } ) );
+			return row;
+
+		}
+
 		const S = this.S;
 		let control, set;
 		const valueLabel = h( 'span', { class: 'value' } );

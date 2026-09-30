@@ -16,6 +16,8 @@
 			--ok: #ffb454;
 			--bad: #ff6b6b;
 			--line: rgba(255, 255, 255, 0.1);
+			--field: #1b2230;
+			--field-line: #3a4458;
 			color-scheme: dark;
 		}
 		* { box-sizing: border-box; }
@@ -54,7 +56,12 @@
 		.row.item { grid-template-columns: 1fr minmax(110px, 44%) auto auto; }
 		.row label { color: var(--fg); }
 		.ctrl { display: flex; align-items: center; gap: 6px; min-width: 0; }
-		.ctrl select, .row > select { width: 100%; min-width: 0; background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 4px; }
+		.ctrl select, .row > select { width: 100%; min-width: 0; background: var(--field); color: var(--fg); border: 1px solid var(--field-line); border-radius: 6px; padding: 5px 6px; color-scheme: dark; }
+		/* Native dropdown lists can't use a translucent background: give options opaque colours
+		   explicitly, otherwise Windows / Android paint light text on a white popup. */
+		select option, select optgroup { background: var(--field); color: var(--fg); }
+		select option:checked { background: #2b3445; color: #ffffff; }
+		select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 		.ctrl input[type=range] { width: 100%; min-width: 0; accent-color: var(--accent); }
 		.ctrl input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
 		.value { color: var(--dim); font-size: 11px; min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }

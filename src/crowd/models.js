@@ -7,6 +7,9 @@
 //   jointB    - xyz: parent pivot (shoulder / hip) for two-segment limbs, w: unused
 //   slot      - colour slot (skin / shirt / pants / shoes / hair)
 //   hullDir   - direction used to "inflate" the mesh for inverted-hull outlines
+//   skinIdx   - two bone ids (bone id == part id) for the skeletal-skinning system
+//   skinW     - weight of the first bone (1 = rigid). Joint rings of the two-segment
+//               limbs are shared 50/50 so skeletal mode bends smoothly at elbows/knees.
 //
 // No normals are stored: the renderer falls back to flat shading computed from
 // screen-space derivatives, which is exactly the faceted Star Fox look we want
@@ -49,6 +52,8 @@ class ModelBuilder {
 		this.jointB = [];
 		this.slots = [];
 		this.hull = [];
+		this.skinIdx = [];
+		this.skinW = [];
 		this.indices = [];
 		this.vertexCount = 0;
 
@@ -57,15 +62,19 @@ class ModelBuilder {
 	// Adds a convex hull given its points and triangle faces (indices into points).
 	// Faces are re-oriented so they always wind counter-clockwise when seen from
 	// outside (relative to the centroid), so authoring order doesn't matter.
-	convex( points, faces, part, slot, pivot, parentPivot = pivot ) {
+	// skin(i) -> [ otherBone, weightOfOther ] or null for rigid vertices.
+	convex( points, faces, part, slot, pivot, parentPivot = pivot, skin = null ) {
 
 		const base = this.vertexCount;
 		const centroid = new THREE.Vector3();
 		for ( const p of points ) centroid.add( p );
 		centroid.divideScalar( points.length );
 
-		for ( const p of points ) {
+		points.forEach( ( p, pi ) => {
 
+			const blend = skin ? skin( pi ) : null;
+			this.skinIdx.push( part, blend ? blend[ 0 ] : part );
+			this.skinW.push( blend ? 1 - blend[ 1 ] : 1 );
 			this.positions.push( p.x, p.y, p.z );
 			this.jointA.push( pivot[ 0 ], pivot[ 1 ], pivot[ 2 ], part );
 			this.jointB.push( parentPivot[ 0 ], parentPivot[ 1 ], parentPivot[ 2 ], 0 );
@@ -75,7 +84,7 @@ class ModelBuilder {
 			h.normalize();
 			this.hull.push( h.x, h.y, h.z );
 
-		}
+		} );
 
 		const ab = new THREE.Vector3(), ac = new THREE.Vector3(), n = new THREE.Vector3(), c = new THREE.Vector3();
 
@@ -103,7 +112,9 @@ class ModelBuilder {
 
 	// N-sided prism (frustum) between two centres. rA/rB are [rx, rz] half extents.
 	// The cross-section is built perpendicular to the segment direction.
-	prism( a, b, rA, rB, sides, part, slot, pivot, parentPivot, rot = 0 ) {
+	// skinBlend: { a: [ bone, weight ], b: [ bone, weight ] } shares the ring at end a / b
+	// with another bone (used by skeletal skinning only).
+	prism( a, b, rA, rB, sides, part, slot, pivot, parentPivot, rot = 0, skinBlend = null ) {
 
 		const A = v3( a ), B = v3( b );
 		const axis = B.clone().sub( A ).normalize();
@@ -150,7 +161,8 @@ class ModelBuilder {
 
 		}
 
-		this.convex( pts, faces, part, slot, pivot, parentPivot );
+		const skin = skinBlend ? ( i ) => ( i < sides ? skinBlend.a : skinBlend.b ) || null : null;
+		this.convex( pts, faces, part, slot, pivot, parentPivot, skin );
 
 	}
 
@@ -211,6 +223,8 @@ class ModelBuilder {
 		g.setAttribute( 'jointB', new THREE.Float32BufferAttribute( this.jointB, 4 ) );
 		g.setAttribute( 'slot', new THREE.Float32BufferAttribute( this.slots, 1 ) );
 		g.setAttribute( 'hullDir', new THREE.Float32BufferAttribute( this.hull, 3 ) );
+		g.setAttribute( 'skinIdx', new THREE.Float32BufferAttribute( this.skinIdx, 2 ) );
+		g.setAttribute( 'skinW', new THREE.Float32BufferAttribute( this.skinW, 1 ) );
 		g.setIndex( this.indices );
 		g.name = name;
 		g.boundingSphere = new THREE.Sphere( new THREE.Vector3( 0, 0.9, 0 ), 1.2 );
@@ -293,11 +307,13 @@ function buildBoxMan() {
 
 		const L = s > 0;
 		const sh = L ? J.lShoulder : J.rShoulder, el = L ? J.lElbow : J.rElbow, wr = L ? J.lWrist : J.rWrist;
-		m.prism( [ sh[ 0 ] + 0.02 * s, 1.47, 0 ], el, [ 0.055, 0.06 ], [ 0.045, 0.05 ], 4, L ? PART.L_ARM : PART.R_ARM, SLOT.SHIRT, sh );
-		m.prism( el, wr, [ 0.045, 0.045 ], [ 0.035, 0.035 ], 4, L ? PART.L_FOREARM : PART.R_FOREARM, SLOT.SKIN, el, sh );
+		const UA = L ? PART.L_ARM : PART.R_ARM, FA = L ? PART.L_FOREARM : PART.R_FOREARM;
+		const TH = L ? PART.L_LEG : PART.R_LEG, SH = L ? PART.L_SHIN : PART.R_SHIN;
+		m.prism( [ sh[ 0 ] + 0.02 * s, 1.47, 0 ], el, [ 0.055, 0.06 ], [ 0.045, 0.05 ], 4, UA, SLOT.SHIRT, sh, sh, 0, { b: [ FA, 0.5 ] } );
+		m.prism( el, wr, [ 0.045, 0.045 ], [ 0.035, 0.035 ], 4, FA, SLOT.SKIN, el, sh, 0, { a: [ UA, 0.5 ] } );
 		const hp = L ? J.lHip : J.rHip, kn = L ? J.lKnee : J.rKnee, an = L ? J.lAnkle : J.rAnkle;
-		m.prism( [ hp[ 0 ], 0.9, 0 ], kn, [ 0.075, 0.08 ], [ 0.06, 0.065 ], 4, L ? PART.L_LEG : PART.R_LEG, SLOT.PANTS, hp );
-		m.prism( kn, an, [ 0.055, 0.06 ], [ 0.045, 0.05 ], 4, L ? PART.L_SHIN : PART.R_SHIN, SLOT.PANTS, kn, hp );
+		m.prism( [ hp[ 0 ], 0.9, 0 ], kn, [ 0.075, 0.08 ], [ 0.06, 0.065 ], 4, TH, SLOT.PANTS, hp, hp, 0, { b: [ SH, 0.5 ] } );
+		m.prism( kn, an, [ 0.055, 0.06 ], [ 0.045, 0.05 ], 4, SH, SLOT.PANTS, kn, hp, 0, { a: [ TH, 0.5 ] } );
 		m.prism( [ an[ 0 ], 0.0, 0.04 ], [ an[ 0 ], 0.09, 0.04 ], [ 0.05, 0.11 ], [ 0.05, 0.1 ], 4, L ? PART.L_SHIN : PART.R_SHIN, SLOT.SHOES, kn, hp );
 
 	}
@@ -316,7 +332,7 @@ function buildHi() {
 	m.prism( [ 0, 1.0, 0 ], [ 0, 1.25, 0 ], [ 0.15, 0.1 ], [ 0.19, 0.12 ], 8, PART.TORSO, SLOT.SHIRT, J.hip );
 	m.prism( [ 0, 1.25, 0 ], [ 0, 1.47, 0 ], [ 0.19, 0.12 ], [ 0.21, 0.1 ], 8, PART.TORSO, SLOT.SHIRT, J.hip );
 	m.prism( [ 0, 0.84, 0 ], [ 0, 1.0, 0 ], [ 0.17, 0.1 ], [ 0.15, 0.1 ], 8, PART.TORSO, SLOT.PANTS, J.hip );
-	m.prism( [ 0, 1.46, 0 ], [ 0, 1.54, 0 ], [ 0.05, 0.05 ], [ 0.045, 0.045 ], 6, PART.HEAD, SLOT.SKIN, J.neck );
+	m.prism( [ 0, 1.46, 0 ], [ 0, 1.54, 0 ], [ 0.05, 0.05 ], [ 0.045, 0.045 ], 6, PART.HEAD, SLOT.SKIN, J.neck, J.neck, 0, { a: [ PART.TORSO, 0.6 ] } );
 	m.sphere( [ 0, 1.65, 0.01 ], 0.12, 1, PART.HEAD, SLOT.SKIN, J.neck, 1.15 );
 	m.sphere( [ 0, 1.7, - 0.015 ], 0.122, 0, PART.HEAD, SLOT.HAIR, J.neck, 1.0 );
 	for ( const s of [ 1, - 1 ] ) {
@@ -324,12 +340,14 @@ function buildHi() {
 		const L = s > 0;
 		const sh = L ? J.lShoulder : J.rShoulder, el = L ? J.lElbow : J.rElbow, wr = L ? J.lWrist : J.rWrist;
 		m.octa( [ sh[ 0 ], 1.43, 0 ], 0.07, 0.06, 0.07, L ? PART.L_ARM : PART.R_ARM, SLOT.SHIRT, sh );
-		m.prism( [ sh[ 0 ] + 0.01 * s, 1.44, 0 ], el, [ 0.05, 0.055 ], [ 0.042, 0.045 ], 6, L ? PART.L_ARM : PART.R_ARM, SLOT.SHIRT, sh );
-		m.prism( el, wr, [ 0.042, 0.042 ], [ 0.032, 0.032 ], 6, L ? PART.L_FOREARM : PART.R_FOREARM, SLOT.SKIN, el, sh );
+		const UA = L ? PART.L_ARM : PART.R_ARM, FA = L ? PART.L_FOREARM : PART.R_FOREARM;
+		const TH = L ? PART.L_LEG : PART.R_LEG, SH = L ? PART.L_SHIN : PART.R_SHIN;
+		m.prism( [ sh[ 0 ] + 0.01 * s, 1.44, 0 ], el, [ 0.05, 0.055 ], [ 0.042, 0.045 ], 6, UA, SLOT.SHIRT, sh, sh, 0, { b: [ FA, 0.5 ] } );
+		m.prism( el, wr, [ 0.042, 0.042 ], [ 0.032, 0.032 ], 6, FA, SLOT.SKIN, el, sh, 0, { a: [ UA, 0.5 ] } );
 		m.octa( [ wr[ 0 ], wr[ 1 ] - 0.05, wr[ 2 ] ], 0.035, 0.06, 0.045, L ? PART.L_FOREARM : PART.R_FOREARM, SLOT.SKIN, el, sh );
 		const hp = L ? J.lHip : J.rHip, kn = L ? J.lKnee : J.rKnee, an = L ? J.lAnkle : J.rAnkle;
-		m.prism( [ hp[ 0 ], 0.92, 0 ], kn, [ 0.075, 0.08 ], [ 0.058, 0.062 ], 6, L ? PART.L_LEG : PART.R_LEG, SLOT.PANTS, hp );
-		m.prism( kn, an, [ 0.056, 0.06 ], [ 0.042, 0.046 ], 6, L ? PART.L_SHIN : PART.R_SHIN, SLOT.PANTS, kn, hp );
+		m.prism( [ hp[ 0 ], 0.92, 0 ], kn, [ 0.075, 0.08 ], [ 0.058, 0.062 ], 6, TH, SLOT.PANTS, hp, hp, 0, { b: [ SH, 0.5 ] } );
+		m.prism( kn, an, [ 0.056, 0.06 ], [ 0.042, 0.046 ], 6, SH, SLOT.PANTS, kn, hp, 0, { a: [ TH, 0.5 ] } );
 		m.prism( [ an[ 0 ], 0.0, 0.04 ], [ an[ 0 ], 0.09, 0.05 ], [ 0.05, 0.12 ], [ 0.045, 0.09 ], 6, L ? PART.L_SHIN : PART.R_SHIN, SLOT.SHOES, kn, hp );
 
 	}

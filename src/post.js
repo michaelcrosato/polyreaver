@@ -8,7 +8,7 @@ import * as THREE from 'three/webgpu';
 import {
 	pass, mrt, output, normalView, velocity, metalness, roughness, diffuseColor, vec2, vec3, vec4, uniform, sample,
 	screenUV, renderOutput, packNormalToRGB, unpackRGBToNormal, mix, smoothstep, abs, float, saturation, convertToTexture,
-	orthographicDepthToViewZ
+	orthographicDepthToViewZ, Fn, Loop, If, int, floor, dot, clamp, uniformArray
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
@@ -28,8 +28,22 @@ import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { ssgi } from 'three/addons/tsl/display/SSGINode.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
-import { vignette } from 'three/addons/tsl/display/CRT.js';
+import { vignette, barrelUV, barrelMask, scanlines, colorBleeding } from 'three/addons/tsl/display/CRT.js';
 import { bayerDither } from 'three/addons/tsl/math/Bayer.js';
+
+// Pixel-art filters: render the whole scene at a console-like resolution, upscale with
+// nearest-neighbour sampling, then quantise colours to a palette with ordered (Bayer)
+// dithering. Because the scene really is rendered at low resolution these are FASTER
+// than native rendering - a rare effect that saves GPU time.
+const hexes = ( list ) => list.map( ( h ) => new THREE.Color().setHex( h, THREE.NoColorSpace ) );
+export const PIXEL_MODES = {
+	pico8: { height: 180, palette: hexes( [ 0x000000, 0x1d2b53, 0x7e2553, 0x008751, 0xab5236, 0x5f574f, 0xc2c3c7, 0xfff1e8, 0xff004d, 0xffa300, 0xffec27, 0x00e436, 0x29adff, 0x83769c, 0xff77a8, 0xffccaa ] ) },
+	gameboy: { height: 144, palette: hexes( [ 0x0f380f, 0x306230, 0x8bac0f, 0x9bbc0f ] ) },
+	snes: { height: 224, bits: 5 },
+	crt: { height: 240, bits: 6, crt: true }
+};
+
+const BAYER4 = [ 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 ].map( ( v ) => ( v + 0.5 ) / 16 );
 
 export function needsPost( S ) {
 
@@ -58,6 +72,8 @@ export class PostFX {
 			ca: uniform( 0.25 ),
 			tiltBand: uniform( 0.12 )
 		};
+		this.lowRes = uniform( new THREE.Vector2( 320, 180 ) );
+		this.bayer = uniformArray( BAYER4, 'float' );
 
 	}
 
@@ -82,6 +98,8 @@ export class PostFX {
 		this.dispose();
 		const warnings = [];
 		this.passes = 0;
+		this._pixelPass = null;
+		this._pixelMode = null;
 		if ( ! needsPost( S ) ) return warnings;
 
 		const renderer = this.renderer;
@@ -134,7 +152,16 @@ export class PostFX {
 			if ( S.ssr ) scenePass.getTexture( 'metalrough' ).type = THREE.UnsignedByteType;
 			if ( S.ssgi ) scenePass.getTexture( 'diffuseColor' ).type = THREE.UnsignedByteType;
 
-			if ( S.upscaler === 'fsr1' && S.renderScale < 1 ) scenePass.setResolutionScale( S.renderScale );
+			const pix = PIXEL_MODES[ styl ];
+			this._pixelPass = pix ? scenePass : null;
+			this._pixelMode = pix || null;
+			if ( pix ) {
+
+				this._applyPixelScale();
+				for ( const tex of [ scenePass.getTexture( 'output' ) ] ) tex.minFilter = tex.magFilter = THREE.NearestFilter;
+				if ( S.upscaler === 'fsr1' ) warnings.push( 'FSR 1 upscaling is skipped in pixel-art modes' );
+
+			} else if ( S.upscaler === 'fsr1' && S.renderScale < 1 ) scenePass.setResolutionScale( S.renderScale );
 
 			const sceneColor = scenePass.getTextureNode( 'output' );
 			const depth = scenePass.getTextureNode( 'depth' );
@@ -192,7 +219,7 @@ export class PostFX {
 
 			}
 
-			if ( S.upscaler === 'fsr1' && S.renderScale < 1 ) {
+			if ( S.upscaler === 'fsr1' && S.renderScale < 1 && ! pix ) {
 
 				color = keep( fsr1( color ) );
 
@@ -249,6 +276,7 @@ export class PostFX {
 		}
 
 		if ( styl === 'retro' ) out = vec4( bayerDither( out, float( 24 ) ).rgb, 1 );
+		if ( PIXEL_MODES[ styl ] ) out = this._quantize( out, PIXEL_MODES[ styl ] );
 
 		if ( S.sharpen ) out = keep( sharpen( out, 0.25 ) );
 
@@ -269,6 +297,92 @@ export class PostFX {
 		this.pipeline = pipeline;
 		this.passes += 1;
 		return warnings;
+
+	}
+
+	// Keep the pixel-art render resolution at a fixed console-like height.
+	_applyPixelScale() {
+
+		const pix = this._pixelMode;
+		if ( ! pix || ! this._pixelPass ) return;
+		const size = this.renderer.getDrawingBufferSize( new THREE.Vector2() );
+		const scale = Math.min( 1, pix.height / Math.max( 1, size.y ) );
+		this._pixelPass.setResolutionScale( scale );
+		this.lowRes.value.set( Math.max( 1, Math.floor( size.x * scale ) ), Math.max( 1, Math.floor( size.y * scale ) ) );
+
+	}
+
+	onResize() {
+
+		this._applyPixelScale();
+
+	}
+
+	_quantize( out, pix ) {
+
+		const lowRes = this.lowRes, bayer = this.bayer;
+		const px = floor( screenUV.mul( lowRes ) );
+		const threshold = bayer.element( int( px.y.mod( 4 ) ).mul( 4 ).add( int( px.x.mod( 4 ) ) ) );
+		const dither = threshold.sub( 0.5 );
+		let col = out.rgb;
+
+		if ( pix.palette && pix.palette.length > 4 ) {
+
+			// nearest colour in the palette (perceptually weighted), after dithering
+			const pal = uniformArray( pix.palette, 'color' );
+			const n = pix.palette.length;
+			col = Fn( () => {
+
+				const c = clamp( out.rgb.add( dither.mul( 0.18 ) ), 0, 1 ).toVar();
+				const best = vec3( 0 ).toVar();
+				const bestD = float( 1e9 ).toVar();
+				Loop( n, ( { i } ) => {
+
+					const d = c.sub( pal.element( i ) );
+					const dd = dot( d.mul( d ), vec3( 0.3, 0.59, 0.11 ) );
+					If( dd.lessThan( bestD ), () => {
+
+						bestD.assign( dd );
+						best.assign( pal.element( i ) );
+
+					} );
+
+				} );
+				return best;
+
+			} )();
+
+		} else if ( pix.palette ) {
+
+			// Game Boy: 4 shades of green picked by luminance
+			const pal = uniformArray( pix.palette, 'color' );
+			const lum = dot( out.rgb, vec3( 0.3, 0.59, 0.11 ) );
+			const idx = clamp( floor( lum.mul( 3.6 ).add( dither.mul( 0.9 ) ).add( 0.25 ) ), 0, 3 );
+			col = pal.element( int( idx ) );
+
+		} else {
+
+			// 15/18-bit colour: posterise each channel with dithering
+			const levels = float( ( 1 << pix.bits ) - 1 );
+			col = floor( clamp( out.rgb, 0, 1 ).mul( levels ).add( threshold ) ).div( levels );
+
+		}
+
+		let result = vec4( col, 1 );
+		if ( pix.crt ) {
+
+			// CRT: scanlines per low-res row, colour bleeding, barrel distortion, vignette
+			result = vec4( colorBleeding( result, float( 0.0015 ) ), 1 );
+			result = vec4( scanlines( result.rgb, float( 0.35 ), lowRes.y.mul( Math.PI * 2 ), float( 0 ), screenUV ), 1 );
+			const tex = convertToTexture( result );
+			this.nodes.push( tex );
+			const buv = barrelUV( float( 0.06 ), screenUV );
+			result = vec4( tex.sample( buv ).rgb.mul( barrelMask( buv ) ), 1 );
+			result = vec4( vignette( result.rgb, 0.45, 0.4 ), 1 );
+
+		}
+
+		return result;
 
 	}
 

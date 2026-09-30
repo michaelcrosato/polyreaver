@@ -1,21 +1,17 @@
 // GPU crowd: simulation in a compute shader, animation in the vertex shader.
 //
-// Data layout (one vec4 per agent that the renderer reads):
-//   renderBuf[i] = ( x, animPhase, z, packed )
-//   packed       = state + 8 * headingQuantized(0..255) + 2048 * colourSeed(0..4095)
-// Packing everything the vertex shader needs into 16 bytes keeps bandwidth low and
-// means the GPU-driven path only has to copy one vec4 per visible agent.
-//
+// Per-agent storage (all on the GPU):
+//   renderBuf[i] = ( x, animPhase, z, packed )     packed = state + 8*heading8 + 2048*colourSeed
 //   simBuf[i]    = ( targetX, targetZ, stateTimer, headingPrecise )
-// is only touched by the compute shader.
+//   animBuf[i]   = ( prevState, blend, prevPhase, agentIndex )   cross-fade + skeletal lookup
+// Optional (physics):
+//   collider.*   spatial hash grid, knockback state, obstacle list   (collide.js)
+//   rapierIO     Rapier-driven agents: CPU writes positions, GPU writes desired velocity
+//   proxyBuf     agents near the hero, read back so Rapier can give them colliders
 //
 // Two render paths:
-//   DIRECT     - one instanced draw call for the whole crowd (count = N). The GPU
-//                transforms every agent, even ones that are off screen.
-//   GPU-DRIVEN - a compute pass frustum-culls every agent, picks a level of detail
-//                from its on-screen size, and appends it to a per-LOD list with an
-//                atomic counter. Each LOD is then drawn with drawIndexedIndirect, so
-//                the CPU never knows (or cares) how many agents are visible.
+//   DIRECT     - one instanced draw call for the whole crowd.
+//   GPU-DRIVEN - compute frustum-cull + LOD selection + drawIndexedIndirect per LOD.
 
 import * as THREE from 'three/webgpu';
 import {
@@ -25,70 +21,23 @@ import {
 	positionViewDirection, dot, pow, uv, smoothstep, positionPrevious, positionLocal
 } from 'three/tsl';
 import { getModels, buildBlobGeometry } from './models.js';
+import {
+	makeClipTable, makeProcTable, sampleBlended, channels, poseVertexDynamic, proceduralVertex,
+	emitBoneMatrices, skinVertex, bakeVAT, sampleVAT, rotY, BONES, BONE_ROWS, animMemory
+} from './anim.js';
+import { CLIP_RATE } from './clips.js';
+import { CrowdCollider } from './collide.js';
 
 const TAU = Math.PI * 2;
+const SKELETAL_MAX = 131072; // bone buffer cap: 131k agents x 480 B = 63 MB
+const MAX_PROXIES = 4096;
 
-export const STATE = { IDLE: 0, WALK: 1, RUN: 2, WAVE: 3, CHEER: 4, DANCE: 5, TALK: 6 };
+export const STATE = { IDLE: 0, WALK: 1, RUN: 2, WAVE: 3, CHEER: 4, DANCE: 5, TALK: 6, KNOCKED: 7 };
 
-export const BEHAVIOURS = [
-	{ id: 0, label: 'Wander (random activities)' },
-	{ id: 1, label: 'Converge on hero (mass rush)' },
-	{ id: 2, label: 'Flee from hero' },
-	{ id: 3, label: 'Dance party' },
-	{ id: 4, label: 'Stadium wave' },
-	{ id: 5, label: 'Freeze (simulation off)' }
-];
-
-// Per-state animation parameters, looked up in the vertex shader by state id.
-// A: legSwing, armSwing, kneeBend, elbowBend
-// B: raiseLeft, raiseRight, raiseOsc, bob
-// C: hop, torsoTwist, headYaw, lean
-// D: alternatingRaise, elbowOsc, -, -
-const ANIM = [
-	/* idle  */[ [ 0.02, 0.04, 0.0, - 0.12 ], [ 0.07, 0.07, 0.0, 0.008 ], [ 0.0, 0.0, 0.8, 0.0 ], [ 0, 0, 0, 0 ] ],
-	/* walk  */[ [ 0.45, 0.4, 0.6, - 0.25 ], [ 0.08, 0.08, 0.0, 0.035 ], [ 0.0, 0.06, 0.15, 0.04 ], [ 0, 0, 0, 0 ] ],
-	/* run   */[ [ 0.85, 0.9, 1.3, - 1.4 ], [ 0.12, 0.12, 0.0, 0.07 ], [ 0.0, 0.12, 0.05, 0.2 ], [ 0, 0, 0, 0 ] ],
-	/* wave  */[ [ 0.02, 0.0, 0.0, - 0.3 ], [ 0.08, 2.5, 0.35, 0.01 ], [ 0.0, 0.0, 0.2, 0.0 ], [ 0, 0, 0, 0 ] ],
-	/* cheer */[ [ 0.1, 0.0, 0.3, - 0.2 ], [ 2.7, 2.7, 0.25, 0.0 ], [ 0.22, 0.0, 0.1, 0.0 ], [ 0, 0, 0, 0 ] ],
-	/* dance */[ [ 0.3, 0.0, 0.4, - 0.6 ], [ 0.9, 0.9, 0.0, 0.05 ], [ 0.03, 0.45, 0.2, 0.0 ], [ 0.7, 0, 0, 0 ] ],
-	/* talk  */[ [ 0.02, 0.0, 0.0, - 1.1 ], [ 0.15, 0.15, 0.0, 0.008 ], [ 0.0, 0.12, 0.4, 0.0 ], [ 0, 0.45, 0, 0 ] ]
-];
-
-// Phase speed (radians / second) for the stationary states. Walk/run derive it from speed.
-const PHASE_RATE = [ 1.6, 0, 0, 7.0, 8.0, 5.5, 3.0 ];
-
-// ---------------------------------------------------------------------------
-// Small helpers that emit rotation math (angles are nodes).
-// ---------------------------------------------------------------------------
-function rotX( r, a ) {
-
-	const c = cos( a ), s = sin( a );
-	return vec3( r.x, r.y.mul( c ).sub( r.z.mul( s ) ), r.y.mul( s ).add( r.z.mul( c ) ) );
-
-}
-
-function rotY( r, a ) {
-
-	const c = cos( a ), s = sin( a );
-	return vec3( r.x.mul( c ).add( r.z.mul( s ) ), r.y, r.z.mul( c ).sub( r.x.mul( s ) ) );
-
-}
-
-function rotZ( r, a ) {
-
-	const c = cos( a ), s = sin( a );
-	return vec3( r.x.mul( c ).sub( r.y.mul( s ) ), r.x.mul( s ).add( r.y.mul( c ) ), r.z );
-
-}
-
-// Integer hashing: the multiply must wrap in u32 (float math would saturate for
-// large agent indices and give thousands of agents identical "random" numbers).
-// three.js derives the "previous frame" vertex position (used for the velocity
-// buffer -> motion blur / TRAA) from the raw geometry, which ignores positionNode.
-// Our agents are placed entirely by positionNode, so without this every agent
-// would appear to move from the world origin each frame. We make "previous" equal
-// the current animated position: camera motion is still captured, agent motion
-// (small) is not.
+// three.js derives the "previous frame" vertex position (velocity buffer for motion
+// blur / TRAA) from the raw geometry, which ignores positionNode. Our agents are
+// placed entirely by positionNode, so make "previous" equal the current animated
+// position: camera motion is still captured, agent motion is not.
 export function withPreviousPosition( material ) {
 
 	const setupPosition = material.setupPosition.bind( material );
@@ -104,6 +53,8 @@ export function withPreviousPosition( material ) {
 
 }
 
+// Integer hashing: the multiply must wrap in u32 (float math would saturate for
+// large agent indices and give thousands of agents identical "random" numbers).
 const hashF = ( seed, salt ) => hash( uint( seed ).mul( 7919 ).add( uint( salt ) ) );
 
 export class Crowd {
@@ -113,28 +64,35 @@ export class Crowd {
 		this.renderer = renderer;
 		this.scene = scene;
 		this.models = getModels();
+		this.storageInVertex = ( options.limits?.maxStorageBuffersInVertexStage ?? 8 ) > 0;
 
 		this.capacity = 0;
 		this.count = options.count ?? 20000;
-		this.tier = 0; // model tier (index into MODEL_TIERS)
+		this.tier = 0;
 		this.path = 'direct';
 		this.materialKind = 'unlit';
-		this.animated = true;
+		this.animSystem = 'procedural';
+		this.animBlend = true;
 		this.outlines = false;
 		this.rim = false;
 		this.blobShadows = false;
 		this.castShadow = false;
 		this.receiveShadow = false;
 		this.lodEnabled = true;
+		this.materialFactory = null; // optional ( kind ) => material, supplied by the app (cel shading)
 
-		// Uniforms shared by compute + render
+		// physics coupling (set by the app / physics module)
+		this.collide = false; // GPU spatial-hash collisions
+		this.rapierAgents = 0; // agents 1..N driven by Rapier bodies (0 = off)
+		this.proxies = false; // gather agents near the hero for Rapier proxies
+
 		this.u = {
 			time: uniform( 0 ),
 			dt: uniform( 0 ),
 			frame: uniform( 0, 'uint' ),
-			density: uniform( 0.35 ), // agents per m^2
-			wander: uniform( 14 ), // wander radius (m)
-			activity: uniform( 0.6 ), // fraction choosing to move
+			density: uniform( 0.35 ),
+			wander: uniform( 14 ),
+			activity: uniform( 0.6 ),
 			speedScale: uniform( 1 ),
 			behaviour: uniform( 0 ),
 			count: uniform( 1 ),
@@ -143,8 +101,13 @@ export class Crowd {
 			heroState: uniform( 0 ),
 			heroSpeed: uniform( 0 ),
 			outline: uniform( 0.03 ),
+			outlineColor: uniform( new THREE.Color( 0.02, 0.02, 0.03 ) ),
 			rimColor: uniform( new THREE.Color( 0.35, 0.45, 0.6 ) ),
 			rimPower: uniform( 3.0 ),
+			blendOn: uniform( 1 ),
+			blendSpeed: uniform( 4 ), // 1 / crossfade seconds
+			rapierCount: uniform( 0, 'uint' ),
+			proxyRadius: uniform( 18 ),
 			// culling / LOD
 			planes: [ 0, 1, 2, 3, 4, 5 ].map( () => uniform( new THREE.Vector4() ) ),
 			camPos: uniform( new THREE.Vector3() ),
@@ -155,11 +118,11 @@ export class Crowd {
 			lodOn: uniform( 1 )
 		};
 
-		// One varying carries the per-vertex palette colour to the fragment stage.
 		this.vColor = varyingProperty( 'vec3', 'vCrowdColor' );
-
-		this.animTable = uniformArray( ANIM.flat().map( ( r ) => new THREE.Vector4( ...r ) ), 'vec4' );
-		this.phaseRates = uniformArray( PHASE_RATE, 'float' );
+		this.clipTable = makeClipTable();
+		this.procTable = makeProcTable();
+		this.clipRates = uniformArray( CLIP_RATE, 'float' );
+		this.vatTextures = [];
 
 		this.group = new THREE.Group();
 		this.group.name = 'Crowd';
@@ -182,18 +145,21 @@ export class Crowd {
 		capacity = Math.ceil( capacity / 64 ) * 64;
 		if ( capacity === this.capacity ) return;
 
-		this._disposeBuffers();
+		this._disposeMeshes();
 		this._freeStorage();
 		this.capacity = capacity;
 		this.count = Math.min( this.count, capacity );
 
 		this.renderBuf = instancedArray( capacity, 'vec4' ).setName( 'crowdRender' );
 		this.simBuf = instancedArray( capacity, 'vec4' ).setName( 'crowdSim' );
-
-		this._buildComputes();
-		this.lodBufs = null; // allocated on demand by the GPU-driven path
+		this.animBuf = instancedArray( capacity, 'vec4' ).setName( 'crowdAnim' );
+		this.collider = null;
+		this.boneBuf = null;
+		this.rapierIO = null;
+		this.lodBufs = null;
 		this.lodGeos = null;
 		this._needsInit = true;
+		this._buildComputes();
 		this._rebuildMeshes();
 
 	}
@@ -201,7 +167,6 @@ export class Crowd {
 	_homeOf( fi ) {
 
 		// Vogel / sunflower spiral: agent i lives at radius sqrt(i / (pi * density)).
-		// The first N agents always fill a disc, so the crowd grows outward as N grows.
 		const r = sqrt( fi.div( this.u.density.mul( Math.PI ) ) );
 		const a = fi.mul( 2.39996323 );
 		return vec2( cos( a ), sin( a ) ).mul( r );
@@ -214,13 +179,42 @@ export class Crowd {
 
 	}
 
+	_ensurePhysicsBuffers() {
+
+		if ( this.collide && ! this.collider ) {
+
+			this.collider = new CrowdCollider( this.capacity );
+			this.collider.buildComputes( this.renderBuf );
+
+		}
+
+		if ( this.rapierAgents > 0 && ( ! this.rapierIO || this.rapierIO.value.count < ( this.rapierAgents + 1 ) * 2 ) ) {
+
+			// 2 x vec4 per agent: [ position from Rapier (CPU writes), desired velocity (GPU writes) ]
+			this.rapierIO = instancedArray( ( this.rapierAgents + 1 ) * 2, 'vec4' ).setName( 'rapierIO' );
+
+		}
+
+		if ( this.proxies && ! this.proxyBuf ) {
+
+			this.proxyBuf = instancedArray( MAX_PROXIES, 'vec4' ).setName( 'proxyList' );
+			this.proxyCounter = instancedArray( 1, 'uint' ).setName( 'proxyCounter' );
+
+		}
+
+	}
+
 	_buildComputes() {
 
 		const u = this.u;
 		const renderBuf = this.renderBuf;
 		const simBuf = this.simBuf;
+		const animBuf = this.animBuf;
+		this._ensurePhysicsBuffers();
+		const collider = this.collide ? this.collider : null;
+		const rapier = this.rapierAgents > 0;
 
-		// --- init: scatter everyone around their home ---------------------------
+		// --- init ---------------------------------------------------------------
 		this.initCompute = Fn( () => {
 
 			const i = instanceIndex;
@@ -240,8 +234,10 @@ export class Crowd {
 			} );
 			const hq = floor( heading.div( TAU ).mul( 256 ) ).mod( 256 );
 			const packed = state.add( hq.mul( 8 ) ).add( seed.mul( 2048 ) );
-			renderBuf.element( i ).assign( vec4( pos.x, hashF( fi, 5 ).mul( TAU ), pos.y, packed ) );
+			const phase = hashF( fi, 5 ).mul( TAU );
+			renderBuf.element( i ).assign( vec4( pos.x, phase, pos.y, packed ) );
 			simBuf.element( i ).assign( vec4( pos.x, pos.y, hashF( fi, 6 ).mul( 5 ), heading ) );
+			animBuf.element( i ).assign( vec4( state, 1, phase, fi ) );
 
 		} )().compute( this.capacity ).setName( 'Crowd Init' );
 
@@ -252,113 +248,197 @@ export class Crowd {
 			const fi = float( i );
 			const rd = renderBuf.element( i ).toVar();
 			const sd = simBuf.element( i ).toVar();
+			const ad = animBuf.element( i ).toVar();
 
 			const pos = vec2( rd.x, rd.z ).toVar();
 			const phase = rd.y.toVar();
 			const seed = floor( rd.w.mul( 1 / 2048 ) ).toVar();
 			const rem = rd.w.sub( seed.mul( 2048 ) );
-			const state = rem.sub( floor( rem.mul( 0.125 ) ).mul( 8 ) ).toVar();
+			const stateIn = rem.sub( floor( rem.mul( 0.125 ) ).mul( 8 ) ).toVar();
+			const state = stateIn.toVar();
 			const target = vec2( sd.x, sd.y ).toVar();
 			const timer = sd.z.sub( u.dt ).toVar();
 			const heading = sd.w.toVar();
 			const speedMul = hashF( fi, 7 ).mul( 0.45 ).add( 0.8 ).mul( u.speedScale );
 			const speed = float( 0 ).toVar();
+			const move = vec2( 0 ).toVar();
 			const beh = u.behaviour;
+			const knocked = float( 0 ).toVar();
 
 			const rnd = ( salt ) => hash( i.add( u.frame.mul( 2654435761 ) ).add( uint( salt * 97 ) ) );
 
-			// Behaviour overrides -------------------------------------------------
-			If( beh.equal( 1 ), () => {
+			// physics state (knockback) -------------------------------------------
+			const knockVel = vec2( 0 ).toVar();
+			const knockT = float( 0 ).toVar();
+			if ( collider ) {
 
-				// Converge: everyone heads for a packed disc around the hero.
-				const packR = sqrt( u.count.div( Math.PI * 2.2 ) );
-				const a = fi.mul( 2.39996323 );
-				const slot = vec2( cos( a ), sin( a ) ).mul( sqrt( fi.div( u.count ) ).mul( packR ).add( 1.5 ) );
-				target.assign( u.heroPos.add( slot ) );
-				const d = length( target.sub( pos ) );
-				state.assign( select( d.greaterThan( 25 ), float( 2 ), select( d.greaterThan( 0.6 ), float( 1 ), float( 4 ) ) ) );
-				timer.assign( 1 );
+				const ph = collider.phys.element( i );
+				knockVel.assign( ph.xy );
+				knockT.assign( ph.z.sub( u.dt ) );
+				knocked.assign( step( 0.0001, knockT ) );
 
-			} ).ElseIf( beh.equal( 2 ), () => {
+			}
 
-				// Flee: anyone within 30 m of the hero runs directly away.
-				const away = pos.sub( u.heroPos );
-				const d = length( away );
-				If( d.lessThan( 30 ), () => {
+			const isRapier = rapier ? i.greaterThanEqual( 1 ).and( i.lessThan( u.rapierCount ) ) : null;
+			if ( rapier ) {
 
-					target.assign( pos.add( away.div( max( d, 0.01 ) ).mul( 12 ) ) );
-					state.assign( 2 );
-					timer.assign( 1.5 );
+				If( isRapier, () => {
+
+					const pp = this.rapierIO.element( i.mul( 2 ) );
+					pos.assign( pp.xy );
+					knocked.assign( step( 0.5, pp.z ) );
 
 				} );
 
-			} ).ElseIf( beh.equal( 3 ), () => {
+			}
 
-				state.assign( 5 );
-				timer.assign( 1 );
+			If( knocked.lessThan( 0.5 ), () => {
 
-			} ).ElseIf( beh.equal( 4 ), () => {
+				// Behaviour overrides -------------------------------------------------
+				If( beh.equal( 1 ), () => {
 
-				// Stadium wave: a band sweeping around the centre makes people cheer.
-				const ang = atan( pos.y, pos.x );
-				const sweep = fract( u.time.mul( 0.08 ) ).mul( TAU ).sub( Math.PI );
-				let dA = ang.sub( sweep );
-				dA = dA.sub( floor( dA.add( Math.PI ).div( TAU ) ).mul( TAU ) );
-				const arc = abs( dA ).mul( max( length( pos ), 5 ) );
-				state.assign( select( arc.lessThan( 6 ), float( 4 ), float( 0 ) ) );
-				timer.assign( 1 );
+					const packR = sqrt( u.count.div( Math.PI * 2.2 ) );
+					const a = fi.mul( 2.39996323 );
+					const slot = vec2( cos( a ), sin( a ) ).mul( sqrt( fi.div( u.count ) ).mul( packR ).add( 1.5 ) );
+					target.assign( u.heroPos.add( slot ) );
+					const d = length( target.sub( pos ) );
+					state.assign( select( d.greaterThan( 25 ), float( 2 ), select( d.greaterThan( 0.6 ), float( 1 ), float( 4 ) ) ) );
+					timer.assign( 1 );
 
-			} );
+				} ).ElseIf( beh.equal( 2 ), () => {
 
-			// Pick a new activity when the timer runs out --------------------------
-			If( timer.lessThanEqual( 0 ).and( beh.equal( 0 ).or( beh.equal( 2 ) ) ), () => {
+					const away = pos.sub( u.heroPos );
+					const d = length( away );
+					If( d.lessThan( 30 ), () => {
 
-				const r1 = rnd( 1 ), r2 = rnd( 2 ), r3 = rnd( 3 );
-				If( r1.lessThan( u.activity.mul( 0.85 ) ), () => {
+						target.assign( pos.add( away.div( max( d, 0.01 ) ).mul( 12 ) ) );
+						state.assign( 2 );
+						timer.assign( 1.5 );
 
-					state.assign( select( r2.lessThan( 0.12 ), float( 2 ), float( 1 ) ) );
-					const home = this._homeOf( fi );
-					const a = rnd( 4 ).mul( TAU );
-					const longTrip = r3.lessThan( 0.08 );
-					const radius = select( longTrip, this._crowdRadius().mul( 0.9 ), u.wander );
-					const centre = select( longTrip, vec2( 0 ), home );
-					target.assign( centre.add( vec2( cos( a ), sin( a ) ).mul( sqrt( rnd( 5 ) ).mul( radius ) ) ) );
-					timer.assign( 600 );
+					} );
 
-				} ).Else( () => {
+				} ).ElseIf( beh.equal( 3 ), () => {
 
-					// idle 35%, talk 15%, wave 15%, cheer 15%, dance 20%
-					state.assign( select( r2.lessThan( 0.35 ), float( 0 ),
-						select( r2.lessThan( 0.5 ), float( 6 ),
-							select( r2.lessThan( 0.65 ), float( 3 ),
-								select( r2.lessThan( 0.8 ), float( 4 ), float( 5 ) ) ) ) ) );
-					timer.assign( r3.mul( 5 ).add( 2 ) );
+					state.assign( 5 );
+					timer.assign( 1 );
+
+				} ).ElseIf( beh.equal( 4 ), () => {
+
+					const ang = atan( pos.y, pos.x );
+					const sweep = fract( u.time.mul( 0.08 ) ).mul( TAU ).sub( Math.PI );
+					let dA = ang.sub( sweep );
+					dA = dA.sub( floor( dA.add( Math.PI ).div( TAU ) ).mul( TAU ) );
+					const arc = abs( dA ).mul( max( length( pos ), 5 ) );
+					state.assign( select( arc.lessThan( 6 ), float( 4 ), float( 0 ) ) );
+					timer.assign( 1 );
 
 				} );
 
-			} );
+				// Recovering from a knockdown: pick something new.
+				If( state.equal( 7 ), () => {
 
-			// Locomotion ---------------------------------------------------------
-			const moving = state.equal( 1 ).or( state.equal( 2 ) );
-			If( moving.and( beh.notEqual( 5 ) ), () => {
-
-				speed.assign( select( state.equal( 2 ), float( 3.6 ), float( 1.35 ) ).mul( speedMul ) );
-				const toT = target.sub( pos );
-				const dist = length( toT );
-				const desired = atan( toT.x, toT.y );
-				let dh = desired.sub( heading );
-				dh = dh.sub( floor( dh.add( Math.PI ).div( TAU ) ).mul( TAU ) );
-				const maxTurn = u.dt.mul( 5 );
-				heading.addAssign( clamp( dh, maxTurn.negate(), maxTurn ) );
-				const stride = min( speed.mul( u.dt ), dist );
-				pos.addAssign( vec2( sin( heading ), cos( heading ) ).mul( stride ) );
-				If( dist.lessThan( 0.6 ).and( beh.equal( 0 ).or( beh.equal( 2 ) ) ), () => {
-
+					state.assign( 0 );
 					timer.assign( 0 );
 
 				} );
 
+				// Pick a new activity when the timer runs out --------------------------
+				If( timer.lessThanEqual( 0 ).and( beh.equal( 0 ).or( beh.equal( 2 ) ) ), () => {
+
+					const r1 = rnd( 1 ), r2 = rnd( 2 ), r3 = rnd( 3 );
+					If( r1.lessThan( u.activity.mul( 0.85 ) ), () => {
+
+						state.assign( select( r2.lessThan( 0.12 ), float( 2 ), float( 1 ) ) );
+						const home = this._homeOf( fi );
+						const a = rnd( 4 ).mul( TAU );
+						const longTrip = r3.lessThan( 0.08 );
+						const radius = select( longTrip, this._crowdRadius().mul( 0.9 ), u.wander );
+						const centre = select( longTrip, vec2( 0 ), home );
+						target.assign( centre.add( vec2( cos( a ), sin( a ) ).mul( sqrt( rnd( 5 ) ).mul( radius ) ) ) );
+						timer.assign( 600 );
+
+					} ).Else( () => {
+
+						state.assign( select( r2.lessThan( 0.35 ), float( 0 ),
+							select( r2.lessThan( 0.5 ), float( 6 ),
+								select( r2.lessThan( 0.65 ), float( 3 ),
+									select( r2.lessThan( 0.8 ), float( 4 ), float( 5 ) ) ) ) ) );
+						timer.assign( r3.mul( 5 ).add( 2 ) );
+
+					} );
+
+				} );
+
+				// Locomotion (desired movement) -----------------------------------------
+				const moving = state.equal( 1 ).or( state.equal( 2 ) );
+				If( moving.and( beh.notEqual( 5 ) ), () => {
+
+					speed.assign( select( state.equal( 2 ), float( 3.6 ), float( 1.35 ) ).mul( speedMul ) );
+					const toT = target.sub( pos );
+					const dist = length( toT );
+					const desired = atan( toT.x, toT.y );
+					let dh = desired.sub( heading );
+					dh = dh.sub( floor( dh.add( Math.PI ).div( TAU ) ).mul( TAU ) );
+					const maxTurn = u.dt.mul( 5 );
+					heading.addAssign( clamp( dh, maxTurn.negate(), maxTurn ) );
+					move.assign( vec2( sin( heading ), cos( heading ) ).mul( min( speed.mul( u.dt ), dist ) ) );
+					If( dist.lessThan( 0.6 ).and( beh.equal( 0 ).or( beh.equal( 2 ) ) ), () => {
+
+						timer.assign( 0 );
+
+					} );
+
+				} );
+
+			} ).Else( () => {
+
+				state.assign( 7 );
+				timer.assign( 0.3 );
+
 			} );
+
+			// Apply movement: Rapier-driven agents hand their desired velocity to the CPU.
+			if ( rapier ) {
+
+				If( isRapier, () => {
+
+					this.rapierIO.element( i.mul( 2 ).add( 1 ) ).assign( vec4( move.div( max( u.dt, 1e-4 ) ), heading, 1 ) );
+
+				} ).Else( () => {
+
+					pos.addAssign( move );
+
+				} );
+
+			} else {
+
+				pos.addAssign( move );
+
+			}
+
+			// GPU collisions + knockback -------------------------------------------
+			if ( collider ) {
+
+				// Rapier-driven agents get their collisions from Rapier instead.
+				const gpuAgent = rapier ? i.notEqual( 0 ).and( isRapier.not() ) : i.notEqual( 0 );
+				If( gpuAgent, () => {
+
+					const res = collider.emitResolve( i, pos );
+					pos.addAssign( res.push.mul( collider.u.stiffness ) );
+					If( res.hit.greaterThan( 0.5 ).and( collider.u.knockOn.greaterThan( 0.5 ) ), () => {
+
+						knockVel.addAssign( res.knock );
+						knockT.assign( 1.3 );
+						state.assign( 7 );
+
+					} );
+
+				} );
+				pos.addAssign( knockVel.mul( u.dt ) );
+				knockVel.mulAssign( max( float( 1 ).sub( u.dt.mul( 3 ) ), 0 ) );
+				collider.phys.element( i ).assign( vec4( knockVel, max( knockT, 0 ), 0 ) );
+
+			}
 
 			// Hero (agent 0) is driven by the player ------------------------------
 			If( i.equal( 0 ), () => {
@@ -371,10 +451,16 @@ export class Crowd {
 
 			} );
 
-			// Animation phase ----------------------------------------------------
-			const stateI = int( state );
+			// Animation phase + cross-fade bookkeeping ----------------------------
+			const changed = state.notEqual( stateIn );
+			const prevState = select( changed, stateIn, ad.x ).toVar();
+			const prevPhase = select( changed, phase, ad.z ).toVar();
+			const blend = select( changed, float( 0 ), ad.y ).toVar();
+			blend.assign( select( u.blendOn.greaterThan( 0.5 ), min( blend.add( u.dt.mul( u.blendSpeed ) ), 1 ), float( 1 ) ) );
+			prevPhase.assign( fract( prevPhase.add( u.dt.mul( this.clipRates.element( int( prevState ) ) ) ).div( TAU ) ).mul( TAU ) );
+
 			const rate = select( state.equal( 1 ), speed.mul( 4.8 ),
-				select( state.equal( 2 ), speed.mul( 3.2 ), this.phaseRates.element( stateI ).mul( speedMul.mul( 0.3 ).add( 0.7 ) ) ) );
+				select( state.equal( 2 ), speed.mul( 3.2 ), this.clipRates.element( int( state ) ).mul( speedMul.mul( 0.3 ).add( 0.7 ) ) ) );
 			const frozen = beh.equal( 5 );
 			phase.assign( select( frozen, phase, fract( phase.add( u.dt.mul( rate ) ).div( TAU ) ).mul( TAU ) ) );
 
@@ -382,8 +468,70 @@ export class Crowd {
 			const packed = state.add( hq.mul( 8 ) ).add( seed.mul( 2048 ) );
 			renderBuf.element( i ).assign( vec4( pos.x, phase, pos.y, packed ) );
 			simBuf.element( i ).assign( vec4( target, timer, heading ) );
+			animBuf.element( i ).assign( vec4( prevState, blend, prevPhase, fi ) );
 
 		} )().compute( this.capacity ).setName( 'Crowd Simulate' );
+
+		// --- skeletal: per-agent forward kinematics -> bone matrices --------------
+		this.skelCompute = null;
+		if ( this.animSystem === 'skeletal' ) {
+
+			const cap = Math.min( this.capacity, SKELETAL_MAX );
+			if ( ! this.boneBuf || this.boneCap !== cap ) {
+
+				this.boneBuf = instancedArray( cap * BONES * BONE_ROWS, 'vec4' ).setName( 'boneMatrices' );
+				this.boneCap = cap;
+
+			}
+
+			const boneBuf = this.boneBuf;
+			this.skelCompute = Fn( () => {
+
+				const i = instanceIndex;
+				const rd = renderBuf.element( i );
+				const ad = animBuf.element( i );
+				const seed = floor( rd.w.mul( 1 / 2048 ) );
+				const rem = rd.w.sub( seed.mul( 2048 ) );
+				const state = rem.sub( floor( rem.mul( 0.125 ) ).mul( 8 ) );
+				const P = sampleBlended( this.clipTable, state, rd.y, ad.x, ad.z, ad.y );
+				emitBoneMatrices( boneBuf, int( i ).mul( BONES * BONE_ROWS ), channels( P ) );
+
+			} )().compute( cap ).setName( 'Skeleton FK' );
+
+		}
+
+		// --- proxies: agents near the hero, read back for Rapier ---------------
+		this.proxyReset = this.proxyGather = null;
+		if ( this.proxies ) {
+
+			const counter = storage( this.proxyCounter.value, 'uint', 1 ).toAtomic();
+			const proxyBuf = this.proxyBuf;
+			this.proxyReset = Fn( () => {
+
+				atomicStore( counter.element( 0 ), uint( 0 ) );
+
+			} )().compute( 1 ).setName( 'Proxy Reset' );
+			this.proxyGather = Fn( () => {
+
+				const i = instanceIndex;
+				const rd = renderBuf.element( i );
+				const d = length( vec2( rd.x, rd.z ).sub( u.heroPos ) );
+				If( i.notEqual( 0 ).and( d.lessThan( u.proxyRadius ) ), () => {
+
+					const slot = atomicAdd( counter.element( 0 ), uint( 1 ) ).toVar();
+					If( slot.lessThan( uint( MAX_PROXIES ) ), () => {
+
+						proxyBuf.element( slot ).assign( vec4( rd.x, rd.z, float( i ), 0 ) );
+
+					} );
+
+				} );
+
+			} )().compute( this.capacity ).setName( 'Proxy Gather' );
+
+		}
+
+		if ( this.lodBufs ) this._buildCull();
 
 	}
 
@@ -393,8 +541,8 @@ export class Crowd {
 
 		const cap = this.capacity;
 		this.lodBufs = [ 0, 1, 2, 3 ].map( ( k ) => instancedArray( cap, 'vec4' ).setName( 'crowdLod' + k ) );
+		this.lodAnimBufs = [ 0, 1, 2, 3 ].map( ( k ) => instancedArray( cap, 'vec4' ).setName( 'crowdLodAnim' + k ) );
 
-		// Indirect args, 5 x u32 per tier: indexCount, instanceCount, firstIndex, baseVertex, firstInstance
 		const args = new Uint32Array( 20 );
 		this.models.forEach( ( m, k ) => {
 
@@ -402,11 +550,10 @@ export class Crowd {
 
 		} );
 		this.drawArgs = new THREE.IndirectStorageBufferAttribute( args, 1 );
-		const draw = storage( this.drawArgs, 'uint', 20 ).toAtomic();
 
-		// One geometry per LOD tier sharing the model's vertex buffers but with its
-		// own indirect-args offset. Created once and never disposed: disposing a
-		// geometry in three.js also destroys the storage buffers its materials read.
+		// One geometry per LOD tier sharing the model's vertex buffers but with its own
+		// indirect-args offset. Never disposed: disposing a geometry in three.js also
+		// destroys the storage buffers its materials read.
 		this.lodGeos = this.models.map( ( m, k ) => {
 
 			const src = m.geometry;
@@ -415,10 +562,18 @@ export class Crowd {
 			g.setIndex( src.index );
 			g.setIndirect( this.drawArgs, k * 5 * 4 );
 			g.boundingSphere = src.boundingSphere;
+			g.name = src.name;
 			return g;
 
 		} );
 
+		this._buildCull();
+
+	}
+
+	_buildCull() {
+
+		const draw = storage( this.drawArgs, 'uint', 20 ).toAtomic();
 		this.resetCompute = Fn( () => {
 
 			atomicStore( draw.element( instanceIndex.mul( 5 ).add( 1 ) ), uint( 0 ) );
@@ -426,64 +581,56 @@ export class Crowd {
 		} )().compute( 4 ).setName( 'Crowd Reset Args' );
 
 		const u = this.u;
-		const renderBuf = this.renderBuf;
-		const lodBufs = this.lodBufs;
+		const renderBuf = this.renderBuf, animBuf = this.animBuf;
+		const lodBufs = this.lodBufs, lodAnim = this.lodAnimBufs;
 
-		this.cullCompute = Fn( () => {
+		// The cull is split into passes that each own two LOD tiers, so no pass binds
+		// more than 7 storage buffers (8 is the default limit per shader stage and the
+		// real limit on many phones). Each pass re-tests visibility (cheap) and only
+		// appends agents whose tier it owns.
+		const makePass = ( tiers ) => Fn( () => {
 
 			const i = instanceIndex;
 			const rd = renderBuf.element( i ).toVar();
 			const c = vec3( rd.x, 0.9, rd.z );
-			const radius = float( 1.3 );
 			const visible = float( 1 ).toVar();
-			for ( const p of u.planes ) {
-
-				visible.mulAssign( step( radius.negate(), dot( p.xyz, c ).add( p.w ) ) );
-
-			}
+			for ( const p of u.planes ) visible.mulAssign( step( - 1.3, dot( p.xyz, c ).add( p.w ) ) );
 
 			If( visible.greaterThan( 0.5 ), () => {
 
-				// Estimated on-screen height in pixels.
 				const dist = length( c.sub( u.camPos ) );
 				const px = select( u.isOrtho.greaterThan( 0.5 ), u.pxScale, u.pxScale.div( max( dist, 0.5 ) ) ).mul( 1.8 );
 				const t = u.lodThresholds;
 				const lodTier = select( px.greaterThan( t.x ), float( 3 ), select( px.greaterThan( t.y ), float( 2 ), select( px.greaterThan( t.z ), float( 1 ), float( 0 ) ) ) );
 				const tier = int( select( u.lodOn.greaterThan( 0.5 ), min( lodTier, u.maxTier ), u.maxTier ) ).toVar();
-				const slot = atomicAdd( draw.element( tier.mul( 5 ).add( 1 ) ), uint( 1 ) ).toVar( 'slot' );
-				If( tier.equal( 0 ), () => {
+				for ( const k of tiers ) {
 
-					lodBufs[ 0 ].element( slot ).assign( rd );
+					If( tier.equal( k ), () => {
 
-				} ).ElseIf( tier.equal( 1 ), () => {
+						const slot = atomicAdd( draw.element( k * 5 + 1 ), uint( 1 ) ).toVar();
+						lodBufs[ k ].element( slot ).assign( rd );
+						lodAnim[ k ].element( slot ).assign( animBuf.element( i ) );
 
-					lodBufs[ 1 ].element( slot ).assign( rd );
+					} );
 
-				} ).ElseIf( tier.equal( 2 ), () => {
-
-					lodBufs[ 2 ].element( slot ).assign( rd );
-
-				} ).Else( () => {
-
-					lodBufs[ 3 ].element( slot ).assign( rd );
-
-				} );
+				}
 
 			} );
 
-		} )().compute( this.capacity ).setName( 'Crowd Cull + LOD' );
+		} )().compute( this.capacity ).setName( `Crowd Cull + LOD ${tiers.join( '/' )}` );
+
+		this.cullPasses = [ makePass( [ 0, 1 ] ), makePass( [ 2, 3 ] ) ];
 
 	}
 
 	// -----------------------------------------------------------------------
-	// Vertex shader: decode instance, animate parts, place in world.
+	// Vertex shader: decode instance, animate, place in world.
 	// -----------------------------------------------------------------------
-	_vertexNode( inst, { hull = false } = {} ) {
+	_vertexNode( inst, anim, tier, { hull = false } = {} ) {
 
 		const u = this.u;
-		const animTable = this.animTable;
-		const animated = this.animated;
 		const vColor = this.vColor;
+		const system = this.animSystem;
 
 		return Fn( () => {
 
@@ -497,68 +644,40 @@ export class Crowd {
 
 			const jointA = attribute( 'jointA', 'vec4' );
 			const jointB = attribute( 'jointB', 'vec4' );
-			let v = attribute( 'position', 'vec3' ).toVar();
-			if ( hull ) v.addAssign( attribute( 'hullDir', 'vec3' ).mul( u.outline ) );
+			const hullOffset = hull ? attribute( 'hullDir', 'vec3' ).mul( u.outline ) : null;
+			let v = attribute( 'position', 'vec3' );
+			if ( hullOffset && system !== 'vat' ) v = v.add( hullOffset );
 
-			if ( animated ) {
+			if ( system === 'procedural' ) {
 
-				const si = int( state ).mul( 4 );
-				const A = animTable.element( si );
-				const B = animTable.element( si.add( 1 ) );
-				const C = animTable.element( si.add( 2 ) );
-				const D = animTable.element( si.add( 3 ) );
+				v = proceduralVertex( v, jointA, jointB, this.procTable, state, p, u.time, seed );
 
-				const part = jointA.w;
-				const isLimb = step( 1.5, part );
-				const isLower = step( 5.5, part );
-				const qm = part.sub( 2 ).mod( 4 );
-				const isArm = isLimb.mul( step( qm, 1.5 ) );
-				const isLeg = isLimb.sub( isArm );
-				const side = float( 1 ).sub( qm.mod( 2 ).mul( 2 ) ); // +1 left, -1 right
-				const isHead = float( 1 ).sub( step( 0.5, abs( part.sub( 1 ) ) ) );
-				const upperBody = float( 1 ).sub( isLeg );
+			} else if ( system === 'keyframe' ) {
 
-				const sp = sin( p ), cp = cos( p ), s2p = sin( p.mul( 2 ) );
+				const P = sampleBlended( this.clipTable, state, p, anim.x, anim.z, anim.y );
+				v = poseVertexDynamic( v, jointA, jointB, channels( P ) );
 
-				const legSwing = A.x.mul( sp ).mul( side );
-				const armSwing = A.y.mul( sp ).mul( side ).negate();
-				const knee = A.z.mul( max( cp.mul( side ).negate(), 0 ) );
-				const elbow = A.w.add( D.y.mul( sin( p.add( side ) ) ) );
-				const raiseBase = select( side.greaterThan( 0 ), B.x, B.y );
-				const raise = side.mul( raiseBase
-					.add( B.z.mul( step( 1.0, raiseBase ) ).mul( s2p ) )
-					.add( D.x.mul( side ).mul( sp ) ) );
-				const bob = B.w.mul( abs( cp ) ).add( C.x.mul( max( s2p, 0 ) ) );
-				const twist = C.y.mul( sp );
-				const headYaw = C.z.mul( sin( u.time.mul( 0.45 ).add( seed ) ) );
+			} else if ( system === 'skeletal' ) {
 
-				// 1. lower segment bends around elbow / knee
-				const bend = isLower.mul( isArm.mul( elbow ).add( isLeg.mul( knee ) ) );
-				v.assign( rotX( v.sub( jointA.xyz ), bend ).add( jointA.xyz ) );
-				// 2. whole limb swings around shoulder / hip, arms can raise sideways
-				const swing = isArm.mul( armSwing ).add( isLeg.mul( legSwing ) );
-				const pivotB = jointB.xyz;
-				v.assign( rotZ( rotX( v.sub( pivotB ), swing ), isArm.mul( raise ) ).add( pivotB ) );
-				// 3. head looks around
-				const neck = vec3( 0, 1.5, 0 );
-				v.assign( rotY( v.sub( neck ), headYaw.mul( isHead ) ).add( neck ) );
-				// 4. upper body leans / twists around the hips
-				const hip = vec3( 0, 0.92, 0 );
-				v.assign( rotY( rotX( v.sub( hip ), C.w.mul( upperBody ) ), twist.mul( upperBody ) ).add( hip ) );
-				// 5. bob / hop
-				v.y.addAssign( bob );
+				const skinned = skinVertex( this.boneBuf, anim.w, v, true );
+				v = select( anim.w.lessThan( this.boneCap ), skinned, v );
+
+			} else if ( system === 'vat' ) {
+
+				const tex = this._vat( tier );
+				const cur = sampleVAT( tex, state, p );
+				const prev = sampleVAT( tex, anim.x, anim.z );
+				v = mix( prev, cur, anim.y );
+				if ( hullOffset ) v = v.add( hullOffset );
 
 			}
 
-			// Per-agent size variation, heading and placement.
 			const scale = select( seed.equal( 0 ), float( 1.12 ), hashF( seed, 11 ).mul( 0.22 ).add( 0.88 ) );
 			const world = rotY( v.mul( scale ), heading ).add( vec3( inst.x, 0, inst.z ) );
 
-			// Palette (computed per vertex, handed to the fragment stage as one varying).
 			if ( ! hull ) {
 
-				// Colours are authored in sRGB and converted to linear (≈ gamma 2.2) so
-				// the palette looks like clothing rather than neon.
+				// Colours authored in sRGB and converted to linear (≈ gamma 2.2).
 				const slot = attribute( 'slot', 'float' );
 				const skin = mix( vec3( 0.97, 0.82, 0.7 ), vec3( 0.38, 0.24, 0.16 ), hashF( seed, 12 ) );
 				const shirt = mx_hsvtorgb( vec3( hashF( seed, 13 ), hashF( seed, 14 ).mul( 0.4 ).add( 0.2 ), hashF( seed, 15 ).mul( 0.5 ).add( 0.4 ) ) );
@@ -571,8 +690,7 @@ export class Crowd {
 					select( slot.lessThan( 1.5 ), shirtF,
 						select( slot.lessThan( 2.5 ), pantsF,
 							select( slot.lessThan( 3.5 ), vec3( 0.16, 0.14, 0.13 ), hair ) ) ) );
-				const col = pow( srgb, vec3( 2.2 ) );
-				vColor.assign( col );
+				vColor.assign( pow( srgb, vec3( 2.2 ) ) );
 
 			}
 
@@ -582,54 +700,66 @@ export class Crowd {
 
 	}
 
-	_makeMaterial( inst, { hull = false } = {} ) {
+	_vat( tier ) {
 
-		let mat;
-		const kind = this.materialKind;
+		if ( ! this.vatTextures[ tier ] ) this.vatTextures[ tier ] = bakeVAT( this.models[ tier ].geometry );
+		return this.vatTextures[ tier ];
+
+	}
+
+	_makeMaterial( inst, anim, tier, { hull = false } = {} ) {
+
 		if ( hull ) {
 
-			mat = new THREE.MeshBasicNodeMaterial( { side: THREE.BackSide } );
-			mat.colorNode = vec4( 0.02, 0.02, 0.03, 1 );
-			mat.positionNode = this._vertexNode( inst, { hull: true } );
+			const mat = new THREE.MeshBasicNodeMaterial( { side: THREE.BackSide } );
+			mat.colorNode = vec4( this.u.outlineColor, 1 );
+			mat.positionNode = this._vertexNode( inst, anim, tier, { hull: true } );
+			mat.fog = true;
 			mat.name = 'CrowdOutline';
 			return withPreviousPosition( mat );
 
 		}
 
-		switch ( kind ) {
+		const kind = this.materialKind;
+		let mat = this.materialFactory ? this.materialFactory( kind ) : null;
+		if ( ! mat ) {
 
-			case 'lambert': mat = new THREE.MeshLambertNodeMaterial(); break;
-			case 'phong': mat = new THREE.MeshPhongNodeMaterial( { shininess: 40, specular: 0x333333 } ); break;
-			case 'standard': mat = new THREE.MeshStandardNodeMaterial( { roughness: 0.65, metalness: 0.0 } ); break;
-			case 'physical': mat = new THREE.MeshPhysicalNodeMaterial( { roughness: 0.45, metalness: 0.0, clearcoat: 0.6, clearcoatRoughness: 0.25, sheen: 0.5, sheenRoughness: 0.6, sheenColor: 0xffffff } ); break;
-			case 'toon': mat = new THREE.MeshToonNodeMaterial(); break;
-			default: mat = new THREE.MeshBasicNodeMaterial();
+			switch ( kind ) {
+
+				case 'lambert': mat = new THREE.MeshLambertNodeMaterial(); break;
+				case 'phong': mat = new THREE.MeshPhongNodeMaterial( { shininess: 40, specular: 0x333333 } ); break;
+				case 'standard': mat = new THREE.MeshStandardNodeMaterial( { roughness: 0.65, metalness: 0.0 } ); break;
+				case 'physical': mat = new THREE.MeshPhysicalNodeMaterial( { roughness: 0.45, metalness: 0.0, clearcoat: 0.6, clearcoatRoughness: 0.25, sheen: 0.5, sheenRoughness: 0.6, sheenColor: 0xffffff } ); break;
+				case 'toon': mat = new THREE.MeshToonNodeMaterial(); break;
+				default: mat = new THREE.MeshBasicNodeMaterial();
+
+			}
 
 		}
 
 		const vColor = this.vColor;
-		mat.positionNode = this._vertexNode( inst );
+		mat.positionNode = this._vertexNode( inst, anim, tier );
+		const baseColor = mat.userData.crowdColor ? mat.userData.crowdColor( vColor ) : vColor;
 
 		if ( this.rim ) {
 
-			// Fresnel rim light: brightens silhouettes facing away from the camera.
 			const fres = pow( float( 1 ).sub( clamp( dot( normalView, positionViewDirection ), 0, 1 ) ), this.u.rimPower );
 			const rimCol = this.u.rimColor.mul( fres );
-			if ( kind === 'unlit' ) mat.colorNode = vec4( vColor.add( rimCol ), 1 );
+			if ( mat.isMeshBasicNodeMaterial ) mat.colorNode = vec4( baseColor.add( rimCol ), 1 );
 			else {
 
-				mat.colorNode = vec4( vColor, 1 );
+				mat.colorNode = vec4( baseColor, 1 );
 				mat.emissiveNode = rimCol;
 
 			}
 
 		} else {
 
-			mat.colorNode = vec4( vColor, 1 );
+			mat.colorNode = vec4( baseColor, 1 );
 
 		}
 
-		mat.name = 'Crowd_' + kind;
+		mat.name = 'Crowd_' + kind + '_' + this.animSystem;
 		return withPreviousPosition( mat );
 
 	}
@@ -658,16 +788,7 @@ export class Crowd {
 	// -----------------------------------------------------------------------
 	_rebuildMeshes() {
 
-		for ( const m of this.meshes ) {
-
-			this.group.remove( m );
-			m.material.dispose();
-
-		}
-
-		this.meshes = [];
-		this.drawMeshes = [];
-
+		this._disposeMeshes();
 		const addMesh = ( geometry, material, extra = {} ) => {
 
 			const mesh = new THREE.Mesh( geometry, material );
@@ -684,16 +805,11 @@ export class Crowd {
 
 			const model = this.models[ this.tier ];
 			const inst = this.renderBuf.toAttribute();
-			const main = addMesh( model.geometry, this._makeMaterial( inst ), { kind: 'crowd', tier: this.tier } );
+			const anim = this.animBuf.toAttribute();
+			const main = addMesh( model.geometry, this._makeMaterial( inst, anim, this.tier ), { kind: 'crowd', tier: this.tier } );
 			main.castShadow = this.castShadow;
 			main.receiveShadow = this.receiveShadow;
-			this.drawMeshes.push( main );
-			if ( this.outlines ) {
-
-				const o = addMesh( model.geometry, this._makeMaterial( inst, { hull: true } ), { kind: 'outline', tier: this.tier } );
-				this.drawMeshes.push( o );
-
-			}
+			if ( this.outlines ) addMesh( model.geometry, this._makeMaterial( inst, anim, this.tier, { hull: true } ), { kind: 'outline', tier: this.tier } );
 
 		} else {
 
@@ -701,14 +817,15 @@ export class Crowd {
 			for ( let k = 0; k <= this.tier; k ++ ) {
 
 				const inst = this.lodBufs[ k ].toAttribute();
+				const anim = this.lodAnimBufs[ k ].toAttribute();
 				const geo = this.lodGeos[ k ];
-				const main = addMesh( geo, this._makeMaterial( inst ), { kind: 'crowd', tier: k } );
+				const main = addMesh( geo, this._makeMaterial( inst, anim, k ), { kind: 'crowd', tier: k } );
 				main.castShadow = this.castShadow;
 				main.receiveShadow = this.receiveShadow;
 				main.count = 2; // real count comes from the indirect buffer
 				if ( this.outlines ) {
 
-					const o = addMesh( geo, this._makeMaterial( inst, { hull: true } ), { kind: 'outline', tier: k } );
+					const o = addMesh( geo, this._makeMaterial( inst, anim, k, { hull: true } ), { kind: 'outline', tier: k } );
 					o.count = 2;
 
 				}
@@ -740,9 +857,6 @@ export class Crowd {
 
 	}
 
-	// -----------------------------------------------------------------------
-	// Public setters
-	// -----------------------------------------------------------------------
 	setCount( n ) {
 
 		this.count = Math.max( 1, Math.min( Math.floor( n ), this.capacity ) );
@@ -752,13 +866,37 @@ export class Crowd {
 
 	set( options ) {
 
-		let rebuild = false;
-		for ( const key of [ 'tier', 'path', 'materialKind', 'animated', 'outlines', 'rim', 'blobShadows' ] ) {
+		let rebuild = false, recompute = false;
+		for ( const key of [ 'tier', 'path', 'materialKind', 'outlines', 'rim', 'blobShadows' ] ) {
 
 			if ( key in options && options[ key ] !== this[ key ] ) {
 
 				this[ key ] = options[ key ];
 				rebuild = true;
+
+			}
+
+		}
+
+		if ( 'animSystem' in options ) {
+
+			let sys = options.animSystem;
+			if ( sys === 'skeletal' && ! this.storageInVertex ) sys = 'keyframe';
+			if ( sys !== this.animSystem ) {
+
+				this.animSystem = sys;
+				rebuild = recompute = true;
+
+			}
+
+		}
+
+		for ( const key of [ 'collide', 'rapierAgents', 'proxies' ] ) {
+
+			if ( key in options && options[ key ] !== this[ key ] ) {
+
+				this[ key ] = options[ key ];
+				recompute = true;
 
 			}
 
@@ -775,15 +913,28 @@ export class Crowd {
 
 		}
 
+		if ( 'animBlend' in options ) {
+
+			this.animBlend = options.animBlend;
+			this.u.blendOn.value = options.animBlend ? 1 : 0;
+
+		}
+
 		if ( 'lodEnabled' in options ) this.lodEnabled = options.lodEnabled;
+		if ( recompute ) this._buildComputes();
 		if ( rebuild ) this._rebuildMeshes();
 
 	}
 
-	// Radius of the disc the first `count` agents occupy (their homes).
 	get radius() {
 
 		return Math.sqrt( this.count / ( this.u.density.value * Math.PI ) ) + this.u.wander.value;
+
+	}
+
+	get skeletalLimit() {
+
+		return this.animSystem === 'skeletal' ? ( this.boneCap || 0 ) : Infinity;
 
 	}
 
@@ -797,6 +948,7 @@ export class Crowd {
 		u.time.value = time;
 		u.frame.value = ( u.frame.value + 1 ) >>> 0;
 		u.count.value = this.count;
+		u.rapierCount.value = this.rapierAgents > 0 ? Math.min( this.rapierAgents + 1, this.count ) : 0;
 
 		const computes = [];
 		if ( this._needsInit ) {
@@ -806,19 +958,47 @@ export class Crowd {
 
 		}
 
+		if ( this.collide && this.collider ) {
+
+			this.collider.insertCompute.count = this.count;
+			this.collider.obstacleCompute.count = Math.max( 1, this.collider.numObstacles );
+			computes.push( this.collider.clearCompute, this.collider.insertCompute, this.collider.obstacleCompute );
+
+		}
+
 		this.simCompute.count = this.count;
 		computes.push( this.simCompute );
+
+		if ( this.skelCompute ) {
+
+			this.skelCompute.count = Math.min( this.count, this.boneCap );
+			computes.push( this.skelCompute );
+
+		}
+
+		if ( this.proxyGather ) {
+
+			this.proxyGather.count = this.count;
+			computes.push( this.proxyReset, this.proxyGather );
+
+		}
 
 		if ( this.path === 'gpu' ) {
 
 			this._updateCullUniforms( camera, viewportHeight );
-			this.cullCompute.count = this.count;
-			computes.push( this.resetCompute, this.cullCompute );
+			computes.push( this.resetCompute );
+			const passes = this.tier >= 2 ? this.cullPasses : this.cullPasses.slice( 0, 1 );
+			for ( const pass of passes ) {
+
+				pass.count = this.count;
+				computes.push( pass );
+
+			}
 
 		}
 
 		this.renderer.compute( computes );
-
+		if ( this.collider ) this.collider.u.blast.value.w = 0; // explosion is a one-frame pulse
 		if ( this.path === 'gpu' ) this._maybeReadback();
 
 	}
@@ -867,7 +1047,25 @@ export class Crowd {
 
 	}
 
-	// Triangles submitted per pass for the crowd (excluding shadow passes).
+	// Async GPU -> CPU reads used by the physics module.
+	async readProxies() {
+
+		const [ list, cnt ] = await Promise.all( [
+			this.renderer.getArrayBufferAsync( this.proxyBuf.value ),
+			this.renderer.getArrayBufferAsync( this.proxyCounter.value )
+		] );
+		return { list: new Float32Array( list ), count: Math.min( new Uint32Array( cnt )[ 0 ], MAX_PROXIES ) };
+
+	}
+
+	// Returns the whole [position, steer] array for agents 0..n-1 (steer at i*8+4).
+	async readSteer( n ) {
+
+		const buf = await this.renderer.getArrayBufferAsync( this.rapierIO.value, null, 0, n * 32 );
+		return new Float32Array( buf );
+
+	}
+
 	stats() {
 
 		let tris = 0, instances = 0, draws = 0;
@@ -898,11 +1096,15 @@ export class Crowd {
 
 		}
 
-		return { tris, instances, draws, visibleByTier: this.visibleByTier.slice() };
+		return {
+			tris, instances, draws, visibleByTier: this.visibleByTier.slice(),
+			animBytes: animMemory( this.animSystem, Math.min( this.count, this.skeletalLimit ), this.models.slice( 0, this.tier + 1 ) ),
+			collideBytes: this.collider ? this.collider.memoryBytes : 0
+		};
 
 	}
 
-	_disposeBuffers() {
+	_disposeMeshes() {
 
 		for ( const m of this.meshes ) {
 
@@ -915,13 +1117,13 @@ export class Crowd {
 
 	}
 
-	// Release the GPU memory of the old storage buffers right away instead of
-	// waiting for garbage collection (matters when jumping between 1M and 4M agents).
+	// Release old storage buffers right away instead of waiting for garbage collection.
 	_freeStorage() {
 
 		const attrs = this.renderer._attributes;
 		if ( ! attrs || ! this.renderBuf ) return;
-		const list = [ this.renderBuf, this.simBuf, ...( this.lodBufs || [] ) ].map( ( n ) => n.value );
+		const list = [ this.renderBuf, this.simBuf, this.animBuf, this.boneBuf, ...( this.lodBufs || [] ), ...( this.lodAnimBufs || [] ) ]
+			.filter( Boolean ).map( ( n ) => n.value );
 		if ( this.drawArgs ) list.push( this.drawArgs );
 		for ( const a of list ) {
 
@@ -933,7 +1135,10 @@ export class Crowd {
 
 		}
 
+		if ( this.collider ) this.collider.dispose( this.renderer );
 		this.drawArgs = null;
+		this.boneBuf = null;
+		this.boneCap = 0;
 
 	}
 

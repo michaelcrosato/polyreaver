@@ -49,10 +49,12 @@ export const SECTIONS = [
 				info: 'Swap to cheaper models when a character is only a few pixels tall. Thresholds: >150 px Hi, >60 px Box-man, >22 px Prism, otherwise Tetra.'
 			},
 			{
-				key: 'animation', label: 'Vertex animation', type: 'toggle', def: true, cost: 1, bound: 'vertex / compile',
-				info: 'Walk / run / wave / cheer / dance are procedural: each body part rotates around its joint inside the vertex shader (no skeleton, no bone matrices). Turning it off shows what the pure transform cost is.',
-				mobile: 'Procedural vertex animation is far cheaper than GPU skinning with bone textures; it is what most huge-crowd games do.'
+				key: 'anim', label: 'Animation system', type: 'select', def: 'procedural', cost: 2, bound: 'vertex / compute / memory',
+				options: [ [ 'none', 'None (static pose)' ], [ 'procedural', 'Procedural sine (per vertex)' ], [ 'keyframe', 'Keyframe clips + blending (per vertex)' ], [ 'skeletal', 'Skeletal skinning (bones per agent)' ], [ 'vat', 'Baked vertex animation texture (VAT)' ] ],
+				info: 'Five ways to animate the same crowd, all driving the same 8 activities. Procedural: sine curves per joint, cheapest, states pop. Keyframe: hand-keyed clips (walk contact/passing poses, jumps, disco points...) sampled per vertex from a table, with cross-fades - nicer motion, more ALU per vertex. Skeletal: the clips are sampled ONCE per agent in a compute pass that builds 10 bone matrices (480 bytes/agent/frame), then the vertex shader skins with smooth weights (elbows and knees bend instead of hinging) - the standard game-engine approach, heavy on memory and bandwidth. VAT: every vertex position of every clip frame is baked into a float texture at load time - the vertex shader just reads it back, zero joint maths.',
+				mobile: 'Skeletal needs storage buffers in the vertex stage (some older phones have none - it falls back to keyframe) and ~63 MB for 131k agents. VAT and procedural are the mobile-friendly choices.'
 			},
+			{ key: 'animBlend', label: 'Cross-fade between activities', type: 'toggle', def: true, cost: 1, bound: 'vertex', info: 'Keyframe / skeletal / VAT blend the outgoing and incoming clip over 0.25 s instead of snapping. Costs a second clip sample per vertex (or per agent for skeletal).' },
 			{
 				key: 'behaviour', label: 'Behaviour', type: 'select', def: 0, cost: 1, bound: 'compute',
 				options: [ [ 0, 'Wander (random activities)' ], [ 1, 'Converge on hero (mass rush)' ], [ 2, 'Flee from hero' ], [ 3, 'Dance party' ], [ 4, 'Stadium wave' ], [ 5, 'Freeze (simulation off)' ] ],
@@ -69,8 +71,8 @@ export const SECTIONS = [
 		items: [
 			{
 				key: 'shading', label: 'Shading model', type: 'select', def: 'unlit', cost: 2, bound: 'fill / compile',
-				options: [ [ 'unlit', 'Unlit (flat colour)' ], [ 'lambert', 'Lambert (diffuse)' ], [ 'phong', 'Phong (diffuse + specular)' ], [ 'standard', 'Standard PBR' ], [ 'physical', 'Physical PBR (clearcoat + sheen)' ], [ 'toon', 'Toon (cel shading)' ] ],
-				info: 'Per-pixel lighting maths for every material. Unlit = one colour. Lambert = N·L. Phong adds a specular highlight. Standard is physically based (GGX microfacets, energy conserving). Physical adds clearcoat and sheen layers: noticeably more ALU per pixel. Toon quantises light into bands.',
+				options: [ [ 'unlit', 'Unlit (flat colour)' ], [ 'lambert', 'Lambert (diffuse)' ], [ 'phong', 'Phong (diffuse + specular)' ], [ 'standard', 'Standard PBR' ], [ 'physical', 'Physical PBR (clearcoat + sheen)' ], [ 'toon', 'Toon (three.js default)' ], [ 'celWW', 'Cel - Wind Waker style' ], [ 'celJSR', 'Cel - Jet Set Radio style' ] ],
+				info: 'Per-pixel lighting maths for every material. Unlit = one colour. Lambert = N·L. Phong adds a specular highlight. Standard is physically based (GGX microfacets, energy conserving). Physical adds clearcoat and sheen layers: noticeably more ALU per pixel. Toon quantises light into bands. The two cel styles use a custom lighting model: hard anti-aliased light bands, coloured (not grey) shadows, rim and specular bands - Wind Waker is soft and blue-shadowed, Jet Set Radio is a hard split with saturated colours (pair it with thick outlines).',
 				mobile: 'Lambert/Phong or Standard with few lights is the usual mobile sweet spot. Physical is rarely worth it on phones.'
 			},
 			{ key: 'hemi', label: 'Ambient (hemisphere light)', type: 'toggle', def: true, cost: 1, bound: 'fill', info: 'Sky/ground colour fill so shadowed sides are not pitch black. One cheap light term. Only matters with a lit shading model.' },
@@ -90,6 +92,7 @@ export const SECTIONS = [
 			},
 			{ key: 'clustered', label: 'Clustered (Forward+) lighting', type: 'toggle', def: false, cost: 2, bound: 'compute / fill', info: 'A compute pass bins lights into screen tiles x depth slices; each pixel only evaluates the lights touching its cluster. Makes 100s of lights affordable.', mobile: 'Needs compute + storage buffers in the fragment stage; supported on most WebGPU phones.' },
 			{ key: 'rim', label: 'Rim light (fresnel)', type: 'toggle', def: false, cost: 1, bound: 'fill', info: 'Brightens edges facing away from the camera (1 - N·V)^p. A few ALU ops per pixel; makes silhouettes pop in a crowd.' },
+			{ key: 'outlineWidth', label: 'Outline thickness', type: 'range', def: 0.03, min: 0.01, max: 0.15, step: 0.005, cost: 0, bound: 'fill', info: 'How far the inverted hull is pushed out (metres). Jet Set Radio style wants it thick.' },
 			{ key: 'outlines', label: 'Toon outlines (inverted hull)', type: 'toggle', def: false, cost: 3, bound: 'vertex', info: 'Draws every character a second time, inflated along its surface direction, back faces only, in black. Classic cel-shade outline - but it DOUBLES the crowd vertex work.', mobile: 'Consider the screen-space "Ink edges" stylize option instead: fixed cost regardless of crowd size.' }
 		]
 	},
@@ -130,16 +133,36 @@ export const SECTIONS = [
 			{ key: 'grain', label: 'Film grain', type: 'toggle', def: false, cost: 1, bound: 'fill', info: 'Animated noise over the image. Trivial ALU.' },
 			{ key: 'chromatic', label: 'Chromatic aberration', type: 'toggle', def: false, cost: 1, bound: 'bandwidth', info: 'Offsets the colour channels toward the edges: 3 texture reads per pixel.' },
 			{ key: 'sharpen', label: 'Sharpen (RCAS)', type: 'toggle', def: false, cost: 1, bound: 'fill', info: 'Contrast-adaptive sharpening. Recovers crispness after TRAA/FXAA or upscaling.' },
-			{ key: 'stylize', label: 'Stylize', type: 'select', def: 'none', cost: 2, bound: 'fill', options: [ [ 'none', 'None' ], [ 'ink', 'Ink edges (screen-space Sobel)' ], [ 'pixel', 'Pixel art (low-res + edge lines)' ], [ 'retro', 'PS1 retro (vertex snap, low-res, dither)' ] ], info: 'Screen-space outlines cost the same whatever the crowd size (compare with inverted-hull outlines). Pixel/PS1 modes render at low resolution, so they can actually be faster than the default.' }
+			{ key: 'stylize', label: 'Stylize', type: 'select', def: 'none', cost: 2, bound: 'fill', options: [ [ 'none', 'None' ], [ 'ink', 'Ink edges (screen-space Sobel)' ], [ 'pixel', 'Pixel art (low-res + edge lines)' ], [ 'pico8', 'Pixel: PICO-8 16-colour palette' ], [ 'gameboy', 'Pixel: Game Boy 4-shade green' ], [ 'snes', 'Pixel: 16-bit console (15-bit colour)' ], [ 'crt', 'Pixel: CRT arcade (scanlines, curvature)' ], [ 'retro', 'PS1 retro (vertex snap, low-res, dither)' ] ], info: 'Screen-space outlines cost the same whatever the crowd size (compare with inverted-hull outlines). Pixel/PS1 modes render at low resolution, so they can actually be faster than the default. The palette modes quantise every pixel to a fixed console palette with 4x4 ordered (Bayer) dithering: PICO-8 (16 colours, ~320x180), Game Boy (4 greens, 144 lines), 16-bit (15-bit colour, 224 lines), CRT arcade (240 lines + scanlines, colour bleed and screen curvature).' }
 		]
 	},
 	{
 		id: 'physics',
-		title: 'Physics (Rapier 0.19.3)',
+		title: 'Physics (Rapier 0.19.3 + GPU)',
 		items: [
-			{ key: 'physics', label: 'Enable Rapier demo', type: 'toggle', def: false, cost: 3, bound: 'cpu', info: 'Rapier (Rust compiled to WebAssembly) simulates rigid bodies on the CPU. Their transforms are copied into an instanced mesh every frame. This is the opposite model to the crowd: CPU simulation + upload vs. GPU compute. The crowd itself has no collision.', mobile: 'Physics cost is CPU/WASM-bound and single-threaded here, so phones hit their limit much earlier than desktops. Watch the "step" time in the HUD: keep it well under your frame budget (16.7 ms at 60 fps).' },
-			{ key: 'bodies', label: 'Rigid bodies', type: 'select', def: 1000, cost: 3, bound: 'cpu', options: [ [ 250, '250' ], [ 1000, '1,000' ], [ 2500, '2,500' ], [ 5000, '5,000' ], [ 10000, '10,000' ] ], info: 'Boxes and balls raining onto the plaza around the hero. The hero is a kinematic capsule that shoves them around.' },
-			{ key: 'shape', label: 'Shape', type: 'select', def: 'mixed', cost: 1, bound: 'cpu', options: [ [ 'mixed', 'Mixed' ], [ 'box', 'Boxes' ], [ 'ball', 'Balls' ] ], info: 'Box-box contacts are more expensive to solve than sphere contacts.' }
+			{ key: 'physics', label: 'Enable physics', type: 'toggle', def: false, cost: 3, bound: 'cpu / compute', info: 'Turns on physics for everything: rigid bodies fall and collide with each other, the ground, trees, lamps and the monument; the hero becomes a character controller that shoves them; people collide with each other, with props and with bodies (and get knocked over). Rapier (Rust compiled to WebAssembly) runs on the CPU; crowd collisions run on the GPU.', mobile: 'Rapier is single-threaded CPU work: watch "step" in the HUD and keep it well under 16.7 ms. The GPU crowd collisions scale much better on phones.' },
+			{ type: 'actions', actions: [ [ 'explode', '💥 Explosion' ], [ 'wrecking', '⚫ Drop wrecking ball' ], [ 'respawn', '↻ Respawn bodies' ] ] },
+			{ key: 'crowdMode', label: 'Crowd collisions', type: 'select', def: 'gpu', cost: 3, bound: 'compute / cpu', options: [ [ 'off', 'Off (people walk through everything)' ], [ 'gpu', 'GPU spatial hash (every agent)' ], [ 'rapier', 'Rapier rigid bodies (first N agents) + GPU for the rest' ] ], info: 'GPU: a compute pass bins every agent into a 1 m grid (atomic bucket counters) and each agent pushes itself out of neighbours, props and bodies - scales to millions, but it is position-based and one-way against bodies. Rapier: the first N agents become real dynamic capsules - fully two-way (balls bounce off people, people shove each other and pile up) - with the GPU AI steering them. That needs a GPU->CPU readback of steering and a CPU->GPU upload of positions every frame.' },
+			{ key: 'rapierAgents', label: 'Rapier agents (Rapier mode)', type: 'select', def: 2000, cost: 3, bound: 'cpu / bandwidth', options: [ [ 500, '500' ], [ 1000, '1,000' ], [ 2000, '2,000' ], [ 5000, '5,000' ], [ 10000, '10,000' ], [ 20000, '20,000' ] ], info: 'How many agents (nearest the plaza centre) get a real Rapier body. CPU step cost grows roughly linearly with contacts; the readback/upload grows linearly with N.' },
+			{ key: 'agentRadius', label: 'Person radius (personal space)', type: 'range', def: 0.28, min: 0.15, max: 0.6, step: 0.01, cost: 1, bound: 'compute', info: 'Collision radius of each person. Bigger = more neighbours overlap per frame = more work (and a less dense crowd).' },
+			{ key: 'proxies', label: 'Two-way: bodies bounce off people near the hero', type: 'toggle', def: true, cost: 2, bound: 'cpu / bandwidth', info: 'GPU mode is one-way (bodies push people). With this on, a compute pass lists the people within 18 m of the hero, the list is read back to the CPU, and each gets a kinematic Rapier capsule - so falling balls bounce off heads and roll away. A classic "physics proxies near the player" technique.' },
+			{ key: 'proxyCount', label: 'Proxy budget', type: 'select', def: 1024, cost: 2, bound: 'cpu', options: [ [ 256, '256' ], [ 1024, '1,024' ], [ 4096, '4,096' ] ], info: 'Maximum number of kinematic people-proxies inside Rapier.' },
+			{ key: 'knockdown', label: 'Knockdowns', type: 'toggle', def: true, cost: 1, bound: 'compute', info: 'People hit by fast bodies (or the explosion / wrecking ball) are thrown back and play a stagger animation.' },
+			{ key: 'physProps', label: 'Props are solid', type: 'toggle', def: true, cost: 1, bound: 'cpu', info: 'Trees (trunk + canopy cone), lamp posts and the monument get static colliders. Static colliders are cheap: they only cost when something touches them.' },
+			{ key: 'propsDynamic', label: 'Props can be knocked over', type: 'toggle', def: true, cost: 1, bound: 'cpu', info: 'Every tree and lamp post is a sleeping dynamic body instead of a static collider: it costs almost nothing until something heavy (the wrecking ball, a pile of boxes, the hero) hits it, then it wakes up and topples. Toppled props stop blocking people.' },
+			{ key: 'bodies', label: 'Rigid bodies', type: 'select', def: 1000, cost: 3, bound: 'cpu', options: [ [ 0, 'None' ], [ 100, '100' ], [ 250, '250' ], [ 1000, '1,000' ], [ 2500, '2,500' ], [ 5000, '5,000' ], [ 10000, '10,000' ] ], info: 'Number of dynamic bodies. Each one is a CPU-simulated rigid body whose transform is copied into an instanced mesh every frame.' },
+			{ key: 'shape', label: 'Body shape', type: 'select', def: 'mixed', cost: 2, bound: 'cpu', options: [ [ 'mixed', 'Mixed' ], [ 'ball', 'Balls' ], [ 'box', 'Boxes' ], [ 'capsule', 'Capsules' ], [ 'cylinder', 'Cylinders' ], [ 'rock', 'Convex rocks' ] ], info: 'Contact cost order, cheapest first: sphere, capsule, box, cylinder, convex hull. Spheres touch at one point; boxes and hulls need contact manifolds with several points.' },
+			{ key: 'sizeVar', label: 'Body sizes', type: 'select', def: 'uniform', cost: 1, bound: 'cpu', options: [ [ 'uniform', 'Uniform' ], [ 'varied', 'Varied (0.6x - 1.8x)' ] ], info: 'Mixed sizes stack less neatly and make the broad phase work harder.' },
+			{ key: 'spawn', label: 'Spawn pattern', type: 'select', def: 'rain', cost: 2, bound: 'cpu', options: [ [ 'rain', 'Rain around the hero' ], [ 'pile', 'Drop a pile' ], [ 'wall', 'Brick wall' ], [ 'towers', 'Box towers' ] ], info: 'Rain keeps bodies moving (and recycles them). A pile creates a huge contact island all at once. Walls and towers are stacking tests: they need enough solver iterations to stand still.' },
+			{ key: 'restitution', label: 'Bounciness', type: 'range', def: 0.25, min: 0, max: 1, step: 0.05, cost: 0, bound: 'cpu', info: 'Coefficient of restitution for the bodies.' },
+			{ key: 'friction', label: 'Friction', type: 'range', def: 0.7, min: 0, max: 1.5, step: 0.05, cost: 0, bound: 'cpu', info: 'Coulomb friction of the bodies.' },
+			{ key: 'gravity', label: 'Gravity (m/s²)', type: 'range', def: - 9.81, min: - 30, max: 0, step: 0.5, cost: 0, bound: 'cpu', info: 'World gravity. 0 = everything floats.' },
+			{ key: 'hz', label: 'Simulation rate', type: 'select', def: 60, cost: 2, bound: 'cpu', options: [ [ 30, '30 Hz' ], [ 60, '60 Hz' ], [ 120, '120 Hz' ] ], info: 'Fixed timestep with an accumulator (up to 4 steps per frame). Doubling the rate doubles the physics CPU cost but makes fast objects and stacks more stable.' },
+			{ key: 'iterations', label: 'Solver iterations', type: 'select', def: 4, cost: 2, bound: 'cpu', options: [ [ 1, '1' ], [ 2, '2' ], [ 4, '4 (Rapier default)' ], [ 8, '8' ], [ 16, '16' ] ], info: 'How many times per step the constraint solver refines contacts. More = stiffer stacks and less jitter, linearly more CPU.' },
+			{ key: 'ccd', label: 'Continuous collision detection', type: 'toggle', def: false, cost: 2, bound: 'cpu', info: 'Sweeps fast bodies between steps so they cannot tunnel through thin objects. Costs extra time-of-impact queries per moving body.' },
+			{ key: 'sleep', label: 'Allow sleeping', type: 'toggle', def: true, cost: 0, bound: 'cpu', info: 'Bodies that come to rest are skipped until something touches them. Turning this off shows the cost of simulating everything every step.' },
+			{ key: 'recycle', label: 'Recycle fallen / distant bodies', type: 'toggle', def: true, cost: 0, bound: 'cpu', info: 'Rain mode only: bodies that fall off the world or are left behind respawn above the hero.' },
+			{ key: 'physDebug', label: 'Debug draw colliders', type: 'toggle', def: false, cost: 3, bound: 'cpu / bandwidth', info: 'Draws every collider as wireframe lines straight from Rapier. Useful for learning, expensive with many bodies: all the line vertices are rebuilt on the CPU and uploaded every frame.' }
 		]
 	}
 ];
@@ -147,7 +170,7 @@ export const SECTIONS = [
 export function defaults() {
 
 	const out = {};
-	for ( const s of SECTIONS ) for ( const it of s.items ) out[ it.key ] = it.def;
+	for ( const s of SECTIONS ) for ( const it of s.items ) if ( it.key ) out[ it.key ] = it.def;
 	out.camera = 'iso';
 	return out;
 
@@ -182,5 +205,21 @@ export const PRESETS = {
 	retro: {
 		label: 'PS1 retro',
 		values: { shading: 'lambert', stylize: 'retro', fog: 'distance', blobShadows: true, tier: 1 }
+	},
+	windwaker: {
+		label: 'Wind Waker',
+		values: { shading: 'celWW', anim: 'keyframe', tier: 2, sky: 'gradient', hemi: true, shadows: 'medium', crowdShadows: true, fog: 'distance', toneMapping: 'none', bloom: true, aa: 'smaa', grading: true, rim: false }
+	},
+	jsr: {
+		label: 'Jet Set Radio',
+		values: { shading: 'celJSR', anim: 'keyframe', tier: 2, outlines: true, outlineWidth: 0.09, sky: 'gradient', hemi: true, toneMapping: 'none', grading: true, aa: 'fxaa', blobShadows: true }
+	},
+	gameboy: {
+		label: 'Game Boy',
+		values: { shading: 'lambert', stylize: 'gameboy', blobShadows: true, tier: 1, anim: 'vat' }
+	},
+	physics: {
+		label: 'Physics playground',
+		values: { physics: true, crowdMode: 'gpu', proxies: true, bodies: 1000, shading: 'lambert', shadows: 'low', blobShadows: true, anim: 'keyframe', tier: 1 }
 	}
 };

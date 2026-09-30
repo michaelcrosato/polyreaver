@@ -72,19 +72,31 @@ Reading the HUD:
 **Characters** (`src/crowd/models.js`) are built procedurally from convex primitives in four tiers:
 *Tetra* (24 triangles, every body part is a tetrahedron), *Prism* (52, Star Fox style),
 *Box-man* (168, Alone in the Dark style, elbows and knees) and *Hi* (436). There are no normals
-(flat shading comes from screen-space derivatives) and no skeleton: every vertex stores the id of
-its body part and the joint it pivots around.
+(flat shading comes from screen-space derivatives). Every vertex stores its body part, the joint it
+pivots around, and two bone weights for skeletal skinning.
 
 **Simulation** (`src/crowd/crowd.js`) is one compute shader per frame. Each agent picks an
-activity (idle, walk, run, wave, cheer, dance, talk), walks to random targets near its "home" on a
-sunflower spiral (so the crowd grows outward as the count rises), and writes a single packed
-`vec4` per agent: `x, animPhase, z, state + heading + colourSeed`. Behaviour modes (converge on the
-hero, flee, dance party, stadium wave) are just branches in the same shader. There's no collision
-between agents, by design.
+activity (idle, walk, run, wave, cheer, dance, talk, plus "knocked" when physics hits it), walks to
+random targets near its "home" on a sunflower spiral (so the crowd grows outward as the count
+rises), and writes a packed `vec4` (`x, animPhase, z, state + heading + colourSeed`) plus a second
+`vec4` of cross-fade data. Behaviour modes (converge on the hero, flee, dance party, stadium wave)
+are just branches in the same shader.
 
-**Animation** happens in the vertex shader: each part rotates around its joint (hips, knees,
-shoulders, elbows, neck) using sine curves driven by the agent's phase and state. This is how most
-huge-crowd games do it: far cheaper than GPU skinning.
+### Animation systems (`src/crowd/anim.js`, `src/crowd/clips.js`)
+
+Five systems drive the same eight activities, so you can compare looks and costs directly:
+
+| System | Where the work happens | Looks | Cost profile |
+|---|---|---|---|
+| None | nowhere | static A-pose | baseline transform cost |
+| Procedural sine | vertex shader, per vertex | lively but mechanical; activities *pop* when they change | cheapest moving option |
+| Keyframe clips | vertex shader, per vertex, samples a 32-key table | hand-keyed poses (walk contact/passing, jumps, disco points), smooth cross-fades | more ALU and uniform reads per vertex; scales with vertices |
+| Skeletal skinning | compute pass per **agent** builds 10 bone matrices, vertex shader skins | same clips, plus smooth elbows/knees from blended weights | 480 bytes per agent per frame (capped at 131k agents / 63 MB); needs storage buffers in the vertex stage |
+| Baked VAT | load time: every vertex of every clip frame baked into a float texture | identical to keyframe (it *is* the keyframe result) | 2-4 texture reads per vertex, zero joint maths; memory grows with vertices × frames |
+
+The clips are 8 authored key poses per activity, resampled with a Catmull-Rom spline into 32 keys,
+over 16 joint channels. The same data feeds the GPU keyframe sampler, the skeletal compute pass,
+and the CPU VAT baker, so they all show identical motion.
 
 **Two render paths:**
 
@@ -97,10 +109,37 @@ huge-crowd games do it: far cheaper than GPU skinning.
 
 The hero is agent #0: same buffers and shader, driven by uniforms instead of AI.
 
-**Rapier 0.19.3** (`src/physics.js`) is an optional side demo: boxes and balls rain around the
-hero, who is a kinematic capsule that shoves them. It's the opposite architecture to the crowd
-(CPU/WASM simulation with transforms uploaded every frame), so you can compare the two cost models.
-The crowd itself has no physics.
+### Physics (`src/physics.js`, `src/crowd/collide.js`)
+
+With **Enable physics** on, everything collides:
+
+| Pair | How |
+|---|---|
+| bodies ↔ bodies, ground, trees (trunk + canopy), lamps, monument | Rapier 0.19.3 (CPU / WebAssembly) |
+| trees and lamp posts themselves | sleeping dynamic bodies: the wrecking ball, piles or the hero can knock them over |
+| hero ↔ props and bodies | Rapier kinematic character controller: slides along trees, shoves balls |
+| people ↔ people, props, bodies | GPU spatial hash: every agent is binned into a 1 m grid with atomic bucket counters, then pushes itself out of neighbours; fast bodies knock people over (stagger animation) |
+| bodies ↔ people near the hero (two-way) | a compute pass lists people within 18 m of the hero, the list is read back to the CPU and each gets a kinematic Rapier capsule, so balls bounce off heads |
+| or: the first *N* people as real Rapier bodies | *Rapier* crowd mode: the GPU AI writes a desired velocity, the CPU reads it back, Rapier simulates dynamic capsules, and positions are uploaded back to the GPU every frame |
+
+The options expose the usual knobs of a real physics setup: body count, shape (sphere, box,
+capsule, cylinder, convex hull), size variation, spawn pattern (rain, pile, brick wall, towers),
+bounciness, friction, gravity, simulation rate (fixed timestep with an accumulator), solver
+iterations, continuous collision detection, sleeping, recycling, and a collider debug view. There
+are also buttons for an explosion and a wrecking ball.
+
+### Looks
+
+* **Cel shading** (`src/cel.js`) is a custom three.js `LightingModel`. It snaps N·L into hard
+  anti-aliased bands, gives the shadow side a *coloured* tint instead of grey, and adds hard rim
+  and specular bands. There are two styles: *Wind Waker* (soft blue shadows, warm light, no
+  outlines) and *Jet Set Radio* (hard split, saturated colours, purple shadows, meant for thick
+  inverted-hull outlines). Presets set up the rest of each look.
+* **Pixel-art filters** (`src/post.js`) render the scene at a console-like resolution, upscale with
+  nearest-neighbour sampling, and quantise every pixel with 4×4 Bayer ordered dithering. The modes
+  are PICO-8 (16-colour palette), Game Boy (4 greens), 16-bit console (15-bit colour) and CRT
+  arcade (scanlines, colour bleed, screen curvature). Because they really render at low
+  resolution, they usually *save* GPU time.
 
 ## Feature reference
 
@@ -118,7 +157,8 @@ shaders, so expect a one-off hitch).
 | Character model | Tetra - 24 tris | ●●○○ moderate | vertex | Triangles per character. Vertex cost scales linearly with it. In GPU-driven mode this is the MAXIMUM detail: distant agents drop to cheaper models automatically. **Mobile:** Mobile GPUs are often vertex-limited long before fill-limited with tiny triangles. Sub-pixel triangles are wasted work on every GPU. |
 | Render path | Direct: 1 instanced draw, no culling | ●○○○ cheap | vertex / compute | Direct draws every agent even if it is off screen. GPU-driven runs a compute pass that frustum-culls each agent, picks a level of detail from its on-screen size, and writes compacted per-LOD lists that are drawn with drawIndexedIndirect. The CPU never learns how many are visible. This is how modern engines draw huge crowds. **Mobile:** GPU-driven wins as soon as a large part of the crowd is off screen or far away (perspective views). In a zoomed-out isometric view everything is visible and it can be slightly slower. |
 | Automatic LOD (GPU-driven only) | on | ●○○○ free | vertex | Swap to cheaper models when a character is only a few pixels tall. Thresholds: >150 px Hi, >60 px Box-man, >22 px Prism, otherwise Tetra. |
-| Vertex animation | on | ●○○○ cheap | vertex / compile | Walk / run / wave / cheer / dance are procedural: each body part rotates around its joint inside the vertex shader (no skeleton, no bone matrices). Turning it off shows what the pure transform cost is. **Mobile:** Procedural vertex animation is far cheaper than GPU skinning with bone textures; it is what most huge-crowd games do. |
+| Animation system | Procedural sine (per vertex) | ●●○○ moderate | vertex / compute / memory | Five ways to animate the same crowd, all driving the same 8 activities. Procedural: sine curves per joint, cheapest, states pop. Keyframe: hand-keyed clips (walk contact/passing poses, jumps, disco points...) sampled per vertex from a table, with cross-fades - nicer motion, more ALU per vertex. Skeletal: the clips are sampled ONCE per agent in a compute pass that builds 10 bone matrices (480 bytes/agent/frame), then the vertex shader skins with smooth weights (elbows and knees bend instead of hinging) - the standard game-engine approach, heavy on memory and bandwidth. VAT: every vertex position of every clip frame is baked into a float texture at load time - the vertex shader just reads it back, zero joint maths. **Mobile:** Skeletal needs storage buffers in the vertex stage (some older phones have none - it falls back to keyframe) and ~63 MB for 131k agents. VAT and procedural are the mobile-friendly choices. |
+| Cross-fade between activities | on | ●○○○ cheap | vertex | Keyframe / skeletal / VAT blend the outgoing and incoming clip over 0.25 s instead of snapping. Costs a second clip sample per vertex (or per agent for skeletal). |
 | Behaviour | Wander (random activities) | ●○○○ cheap | compute | All simulation runs in one compute shader, so behaviour changes are free on the CPU. "Converge" packs everyone around the hero: huge overdraw hot-spot. |
 | Density (people / m²) | 0.35 | ●○○○ cheap | fill | How tightly the crowd is packed. Denser crowds overlap more on screen (overdraw) and the world gets smaller. |
 | Activity (share walking) | 0.6 | ●○○○ free | compute | Chance that an agent picks walking/running over standing activities when its timer runs out. |
@@ -128,7 +168,7 @@ shaders, so expect a one-off hitch).
 
 | Setting | Default | Cost | Bound by | What it does / why it costs |
 |---|---|---|---|---|
-| Shading model | Unlit (flat colour) | ●●○○ moderate | fill / compile | Per-pixel lighting maths for every material. Unlit = one colour. Lambert = N·L. Phong adds a specular highlight. Standard is physically based (GGX microfacets, energy conserving). Physical adds clearcoat and sheen layers: noticeably more ALU per pixel. Toon quantises light into bands. **Mobile:** Lambert/Phong or Standard with few lights is the usual mobile sweet spot. Physical is rarely worth it on phones. |
+| Shading model | Unlit (flat colour) | ●●○○ moderate | fill / compile | Per-pixel lighting maths for every material. Unlit = one colour. Lambert = N·L. Phong adds a specular highlight. Standard is physically based (GGX microfacets, energy conserving). Physical adds clearcoat and sheen layers: noticeably more ALU per pixel. Toon quantises light into bands. The two cel styles use a custom lighting model: hard anti-aliased light bands, coloured (not grey) shadows, rim and specular bands - Wind Waker is soft and blue-shadowed, Jet Set Radio is a hard split with saturated colours (pair it with thick outlines). **Mobile:** Lambert/Phong or Standard with few lights is the usual mobile sweet spot. Physical is rarely worth it on phones. |
 | Ambient (hemisphere light) | on | ●○○○ cheap | fill | Sky/ground colour fill so shadowed sides are not pitch black. One cheap light term. Only matters with a lit shading model. |
 | Environment map (IBL) | off | ●●○○ moderate | fill / bandwidth | Image-based lighting from a pre-filtered (PMREM) cube map: soft ambient + reflections for Standard/Physical materials. Costs texture samples per pixel. **Mobile:** Fine on phones; the pre-filtering happens once at startup. |
 | Sun shadows | Off | ●●●○ heavy | vertex / fill | Shadow mapping renders the scene a second time from the sun into a depth texture, then every lit pixel samples it. With the crowd casting, the vertex work DOUBLES: every agent is drawn twice. Bigger maps and soft filters add fill and sampling cost. **Mobile:** Real-time shadows for thousands of characters are one of the most expensive things you can turn on for a phone. Use blob shadows instead, or only let nearby agents cast. |
@@ -137,6 +177,7 @@ shaders, so expect a one-off hitch).
 | Point lights (street lamps) | None | ●●●○ heavy | fill / compile | Forward rendering loops over EVERY light for EVERY pixel of every lit material, and the light count is baked into the shader (changing it recompiles). 64+ lights in forward mode gets very slow. |
 | Clustered (Forward+) lighting | off | ●●○○ moderate | compute / fill | A compute pass bins lights into screen tiles x depth slices; each pixel only evaluates the lights touching its cluster. Makes 100s of lights affordable. **Mobile:** Needs compute + storage buffers in the fragment stage; supported on most WebGPU phones. |
 | Rim light (fresnel) | off | ●○○○ cheap | fill | Brightens edges facing away from the camera (1 - N·V)^p. A few ALU ops per pixel; makes silhouettes pop in a crowd. |
+| Outline thickness | 0.03 | ●○○○ free | fill | How far the inverted hull is pushed out (metres). Jet Set Radio style wants it thick. |
 | Toon outlines (inverted hull) | off | ●●●○ heavy | vertex | Draws every character a second time, inflated along its surface direction, back faces only, in black. Classic cel-shade outline - but it DOUBLES the crowd vertex work. **Mobile:** Consider the screen-space "Ink edges" stylize option instead: fixed cost regardless of crowd size. |
 
 ### Environment
@@ -174,19 +215,41 @@ shaders, so expect a one-off hitch).
 | Film grain | off | ●○○○ cheap | fill | Animated noise over the image. Trivial ALU. |
 | Chromatic aberration | off | ●○○○ cheap | bandwidth | Offsets the colour channels toward the edges: 3 texture reads per pixel. |
 | Sharpen (RCAS) | off | ●○○○ cheap | fill | Contrast-adaptive sharpening. Recovers crispness after TRAA/FXAA or upscaling. |
-| Stylize | None | ●●○○ moderate | fill | Screen-space outlines cost the same whatever the crowd size (compare with inverted-hull outlines). Pixel/PS1 modes render at low resolution, so they can actually be faster than the default. |
+| Stylize | None | ●●○○ moderate | fill | Screen-space outlines cost the same whatever the crowd size (compare with inverted-hull outlines). Pixel/PS1 modes render at low resolution, so they can actually be faster than the default. The palette modes quantise every pixel to a fixed console palette with 4x4 ordered (Bayer) dithering: PICO-8 (16 colours, ~320x180), Game Boy (4 greens, 144 lines), 16-bit (15-bit colour, 224 lines), CRT arcade (240 lines + scanlines, colour bleed and screen curvature). |
 
-### Physics (Rapier 0.19.3)
+### Physics (Rapier 0.19.3 + GPU)
 
 | Setting | Default | Cost | Bound by | What it does / why it costs |
 |---|---|---|---|---|
-| Enable Rapier demo | off | ●●●○ heavy | cpu | Rapier (Rust compiled to WebAssembly) simulates rigid bodies on the CPU. Their transforms are copied into an instanced mesh every frame. This is the opposite model to the crowd: CPU simulation + upload vs. GPU compute. The crowd itself has no collision. **Mobile:** Physics cost is CPU/WASM-bound and single-threaded here, so phones hit their limit much earlier than desktops. Watch the "step" time in the HUD: keep it well under your frame budget (16.7 ms at 60 fps). |
-| Rigid bodies | 1,000 | ●●●○ heavy | cpu | Boxes and balls raining onto the plaza around the hero. The hero is a kinematic capsule that shoves them around. |
-| Shape | Mixed | ●○○○ cheap | cpu | Box-box contacts are more expensive to solve than sphere contacts. |
+| Enable physics | off | ●●●○ heavy | cpu / compute | Turns on physics for everything: rigid bodies fall and collide with each other, the ground, trees, lamps and the monument; the hero becomes a character controller that shoves them; people collide with each other, with props and with bodies (and get knocked over). Rapier (Rust compiled to WebAssembly) runs on the CPU; crowd collisions run on the GPU. **Mobile:** Rapier is single-threaded CPU work: watch "step" in the HUD and keep it well under 16.7 ms. The GPU crowd collisions scale much better on phones. |
+| undefined | undefined |  undefined | undefined | undefined |
+| Crowd collisions | GPU spatial hash (every agent) | ●●●○ heavy | compute / cpu | GPU: a compute pass bins every agent into a 1 m grid (atomic bucket counters) and each agent pushes itself out of neighbours, props and bodies - scales to millions, but it is position-based and one-way against bodies. Rapier: the first N agents become real dynamic capsules - fully two-way (balls bounce off people, people shove each other and pile up) - with the GPU AI steering them. That needs a GPU->CPU readback of steering and a CPU->GPU upload of positions every frame. |
+| Rapier agents (Rapier mode) | 2,000 | ●●●○ heavy | cpu / bandwidth | How many agents (nearest the plaza centre) get a real Rapier body. CPU step cost grows roughly linearly with contacts; the readback/upload grows linearly with N. |
+| Person radius (personal space) | 0.28 | ●○○○ cheap | compute | Collision radius of each person. Bigger = more neighbours overlap per frame = more work (and a less dense crowd). |
+| Two-way: bodies bounce off people near the hero | on | ●●○○ moderate | cpu / bandwidth | GPU mode is one-way (bodies push people). With this on, a compute pass lists the people within 18 m of the hero, the list is read back to the CPU, and each gets a kinematic Rapier capsule - so falling balls bounce off heads and roll away. A classic "physics proxies near the player" technique. |
+| Proxy budget | 1,024 | ●●○○ moderate | cpu | Maximum number of kinematic people-proxies inside Rapier. |
+| Knockdowns | on | ●○○○ cheap | compute | People hit by fast bodies (or the explosion / wrecking ball) are thrown back and play a stagger animation. |
+| Props are solid | on | ●○○○ cheap | cpu | Trees (trunk + canopy cone), lamp posts and the monument get static colliders. Static colliders are cheap: they only cost when something touches them. |
+| Props can be knocked over | on | ●○○○ cheap | cpu | Every tree and lamp post is a sleeping dynamic body instead of a static collider: it costs almost nothing until something heavy (the wrecking ball, a pile of boxes, the hero) hits it, then it wakes up and topples. Toppled props stop blocking people. |
+| Rigid bodies | 1,000 | ●●●○ heavy | cpu | Number of dynamic bodies. Each one is a CPU-simulated rigid body whose transform is copied into an instanced mesh every frame. |
+| Body shape | Mixed | ●●○○ moderate | cpu | Contact cost order, cheapest first: sphere, capsule, box, cylinder, convex hull. Spheres touch at one point; boxes and hulls need contact manifolds with several points. |
+| Body sizes | Uniform | ●○○○ cheap | cpu | Mixed sizes stack less neatly and make the broad phase work harder. |
+| Spawn pattern | Rain around the hero | ●●○○ moderate | cpu | Rain keeps bodies moving (and recycles them). A pile creates a huge contact island all at once. Walls and towers are stacking tests: they need enough solver iterations to stand still. |
+| Bounciness | 0.25 | ●○○○ free | cpu | Coefficient of restitution for the bodies. |
+| Friction | 0.7 | ●○○○ free | cpu | Coulomb friction of the bodies. |
+| Gravity (m/s²) | -9.81 | ●○○○ free | cpu | World gravity. 0 = everything floats. |
+| Simulation rate | 60 Hz | ●●○○ moderate | cpu | Fixed timestep with an accumulator (up to 4 steps per frame). Doubling the rate doubles the physics CPU cost but makes fast objects and stacks more stable. |
+| Solver iterations | 4 (Rapier default) | ●●○○ moderate | cpu | How many times per step the constraint solver refines contacts. More = stiffer stacks and less jitter, linearly more CPU. |
+| Continuous collision detection | off | ●●○○ moderate | cpu | Sweeps fast bodies between steps so they cannot tunnel through thin objects. Costs extra time-of-impact queries per moving body. |
+| Allow sleeping | on | ●○○○ free | cpu | Bodies that come to rest are skipped until something touches them. Turning this off shows the cost of simulating everything every step. |
+| Recycle fallen / distant bodies | on | ●○○○ free | cpu | Rain mode only: bodies that fall off the world or are left behind respawn above the hero. |
+| Debug draw colliders | off | ●●●○ heavy | cpu / bandwidth | Draws every collider as wireframe lines straight from Rapier. Useful for learning, expensive with many bodies: all the line vertices are rebuilt on the CPU and uploaded every frame. |
 
 **Presets:** *Bare* (all off), *Mobile friendly* (Lambert, blob shadows, fog, MSAA, rim light, 1.5×
 pixel ratio cap), *Console* (PBR, IBL, medium shadows, SSAO, bloom, SMAA, GPU-driven path), *Ultra*
-(everything heavy on), *Toon*, *PS1 retro*.
+(everything heavy on), *Toon*, *PS1 retro*, *Wind Waker* (cel shading, keyframe animation, soft
+shadows), *Jet Set Radio* (hard cel shading, thick outlines), *Game Boy* (4-shade pixel filter, VAT
+animation) and *Physics playground* (Rapier bodies raining on a colliding crowd).
 
 ## Things worth trying
 
@@ -200,7 +263,13 @@ pixel ratio cap), *Console* (PBR, IBL, medium shadows, SSAO, bloom, SMAA, GPU-dr
   biggest single win.
 * **16 → 64 point lights, forward vs. clustered.** Forward rendering evaluates every light for every
   pixel; clustered only evaluates the lights near that pixel.
-* **Converge on hero** piles the whole crowd into one spot: an overdraw worst case.
+* **Converge on hero** piles the whole crowd into one spot: an overdraw worst case. With physics on,
+  the GPU collisions keep people from overlapping and the pile spreads out instead.
+* **Animation systems** at the same crowd size: procedural vs keyframe vs skeletal vs VAT. Zoom in
+  on Box-man models to see the difference in motion and joints, then run *Measure effect costs*.
+* **GPU vs Rapier crowd collisions**: GPU handles every agent for a few milliseconds of compute;
+  Rapier handles a few thousand with exact two-way contacts but costs CPU time and a round trip.
+* **Pixel filters** often make the frame *cheaper*, because the scene really renders at 144-240 lines.
 
 ## Project layout
 
@@ -208,12 +277,16 @@ pixel ratio cap), *Console* (PBR, IBL, medium shadows, SSAO, bloom, SMAA, GPU-dr
 index.html            UI shell + styles (Vite entry)
 src/main.js           app wiring: settings, frame loop, hero, HUD, report
 src/gpu.js            WebGPU device creation (real hardware limits, no fallback)
-src/crowd/models.js   procedural low-poly character tiers
-src/crowd/crowd.js    compute simulation, vertex animation, direct + GPU-driven paths
+src/crowd/models.js   procedural low-poly character tiers (+ skin weights)
+src/crowd/crowd.js    compute simulation, direct + GPU-driven paths, physics coupling
+src/crowd/anim.js     the five animation systems (procedural, keyframe, skeletal, VAT)
+src/crowd/clips.js    hand-keyed animation clips + CPU pose chain (VAT baking)
+src/crowd/collide.js  GPU spatial-hash crowd collisions
 src/world.js          plaza, props, lights, shadows, sky, fog, environment
 src/camera.js         isometric / top / orbit / chase / eye-level camera rig + input
 src/post.js           post-processing graph (RenderPipeline + TSL nodes)
-src/physics.js        Rapier 0.19.3 demo
+src/physics.js        Rapier 0.19.3 world, bodies, props, hero controller, crowd coupling
+src/cel.js            Wind Waker / Jet Set Radio cel-shading lighting model
 src/features.js       every setting with its cost and teaching note (drives the UI)
 src/bench.js          max-crowd and effect-cost benchmarks
 src/ui.js, input.js   settings panel, HUD graph, keyboard / touch controls
@@ -224,6 +297,11 @@ scripts/              post-build copy + README table generator
 
 * The velocity buffer (for motion blur / TRAA) captures camera motion but not each agent's own
   motion, because agents are positioned entirely by the GPU.
+* GPU crowd collisions are position-based and use fixed-size grid buckets (8 per 1 m cell); in an
+  extremely dense pile a few overlaps are missed each frame. Rapier-mode agents stay upright
+  (rotations locked) and are kept on the ground plane.
+* The two-way proxies and Rapier crowd depend on an asynchronous GPU→CPU readback, so Rapier
+  sees people positions one or two frames late.
 * In the GPU-driven path, culling uses the main camera, so agents just outside the view don't cast
   shadows into it.
 * r186 details handled here: `PCFSoftShadowMap` was folded into `PCFShadowMap` (+ radius), and
