@@ -159,9 +159,9 @@ define( 'theme', {
 	id: 'cinder-caldera', name: 'Cinder Caldera', tags: [ 'fire', 'lava', 'volcanic' ], generator: 'caves',
 	families: [ 'fire', 'elemental', 'salamander' ],
 	palette: { primary: '#3a2e2a', secondary: '#221a18', accent: '#ff5a1a', skin: '#5a4440', metal: '#4a4040', glow: '#ff6a10', dark: '#0c0806' },
-	floor: [ F( '#302624', 0, 0, 0.5, 0.1 ), F( '#382c28', 2, 0.4, 0.4, 0.15 ), F( '#40322c', 3, 0.6, 0.3, 0.2 ), F( '#382c28', 2, 0.4, 0.4 ) ],
-	wall: { color: '#3a2e2a', top: '#54443e', mass: '#0a0605', height: 2.6, pattern: 'rock', jag: 0.7 },
-	liquid: { water: '#2a2020', lava: '#ff4a08', ice: '#a8c8e0', pit: '#100402' },
+	floor: [ F( '#3e302a', 0, 0, 0.5, 0.1 ), F( '#46362f', 2, 0.4, 0.4, 0.15 ), F( '#4e3c33', 3, 0.6, 0.3, 0.2 ), F( '#46362f', 2, 0.4, 0.4 ) ],
+	wall: { color: '#3a2e2a', top: '#54443e', mass: '#2a1a14', height: 2.6, pattern: 'rock', jag: 0.7 },
+	liquid: { water: '#2a2020', lava: '#ff4a08', ice: '#a8c8e0', pit: '#5a1606' }, // the abyss under the caldera is a magma sea
 	features: { lava: 0.35 },
 	props: [
 		{ model: 'prop-basalt', where: 'wall', density: 2.4 }, { model: 'prop-obsidian', where: 'wall', density: 1.4 },
@@ -170,9 +170,9 @@ define( 'theme', {
 	pillar: 'prop-basalt-pillar',
 	lights: { model: 'prop-brazier-decor', kind: 'brazier', color: '#ff7a3a', intensity: 22, range: 11, spacing: 12, flicker: 0.4, height: 1.4 },
 	glow: [ { on: 'lava', color: '#ff5a10', intensity: 26, range: 10 }, { on: 'prop-vent-decor', color: '#ff6a20', intensity: 8, range: 6 } ],
-	lighting: { sky: '#7a3020', ground: '#1a0806', hemi: 0.6, sun: 0.7, sunColor: '#ff9070', sunDir: [ 0.2, 1, 0.45 ], exposure: 1.05, player: { color: '#ffb080', intensity: 6, range: 8 } },
-	fog: { color: '#1c0804', near: 20, far: 50 }, sky: { top: '#0a0202', bottom: '#2a0a04', stars: 0 },
-	post: { bloom: 1, saturation: 1.1, contrast: 1.1, vignette: 0.45, tint: '#ffe8dc' }
+	lighting: { sky: '#8a4030', ground: '#2a120a', hemi: 1.0, sun: 1.15, sunColor: '#ff9a78', sunDir: [ 0.2, 1, 0.45 ], exposure: 1.15, player: { color: '#ffb080', intensity: 6, range: 8 } },
+	fog: { color: '#2a0e06', near: 24, far: 62 }, sky: { top: '#0a0202', bottom: '#2a0a04', stars: 0 },
+	post: { bloom: 1, saturation: 1.1, contrast: 1.06, vignette: 0.35, tint: '#ffe8dc' }
 } );
 
 define( 'theme', {

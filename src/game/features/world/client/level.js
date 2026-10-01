@@ -28,6 +28,7 @@ import { U, floorMaterial, wallMaterial, lavaMaterial, waterMaterial, iceMateria
 import { LightPool } from './lights.js';
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color(), _v = new THREE.Vector3();
+const SCORCH = new THREE.Color( 0.32, 0.12, 0.06 ); // basin floors lean toward it (Color.lerp needs a Color: a Vector3 gives NaN = black)
 const UP = new THREE.Vector3( 0, 1, 0 );
 const GAP = ( t ) => t === TILE.PIT || t === TILE.WATER || t === TILE.LAVA;
 
@@ -222,7 +223,7 @@ define( 'renderSystem', { id: 'level', order: 10,
 
 			const s = styleOf( L.idx( tx, tz ) );
 			out.set( s.color ).multiplyScalar( ( ( s.tiles ?? 1 ) ? 0.94 + rnd( tx, tz, 2 ) * 0.12 : 0.98 + rnd( tx, tz, 2 ) * 0.04 ) * aoOf( tx, tz ) );
-			if ( L.elev?.[ L.idx( tx, tz ) ] === - 1 ) out.multiplyScalar( 0.62 ).lerp( _v.set( 0.25, 0.08, 0.04 ), 0.12 ); // scorched basins
+			if ( L.elev?.[ L.idx( tx, tz ) ] === - 1 ) out.multiplyScalar( 0.8 ).lerp( SCORCH, 0.18 ); // scorched basins
 
 		}, ( tx, tz ) => {
 

@@ -162,9 +162,10 @@ export function lavaMaterial( hex ) {
 	const crust = smoothstep( 0.18, 0.42, cells ).mul( smoothstep( - 0.1, 0.35, flow ) );
 	const glow = float( 1 ).sub( crust.mul( 0.88 ) );
 	// mostly emissive: lit diffuse on top of the glow would wash it out to white
-	m.colorNode = mix( hot.mul( 0.15 ), vec3( 0.05, 0.025, 0.02 ), crust );
+	m.colorNode = mix( hot.mul( 0.15 ), vec3( 0.13, 0.075, 0.055 ), crust ); // crust: dark basalt that still reads under dim light
 	// keep it below the tone mapper's shoulder: bright orange turns pale peach under ACES
-	m.emissiveNode = hot.mul( glow ).mul( float( 0.55 ).add( sin( t.mul( 1.7 ).add( P.x.mul( 0.3 ) ) ).mul( 0.1 ) ) ).add( vec3( 1, 0.45, 0.1 ).mul( pow( glow, 8 ) ).mul( 0.12 ) );
+	m.emissiveNode = hot.mul( glow ).mul( float( 0.55 ).add( sin( t.mul( 1.7 ).add( P.x.mul( 0.3 ) ) ).mul( 0.1 ) ) ).add( vec3( 1, 0.45, 0.1 ).mul( pow( glow, 8 ) ).mul( 0.12 ) )
+		.add( hot.mul( crust ).mul( 0.07 ) ); // the crust smoulders: a basin never reads as a hole
 	return m;
 
 }

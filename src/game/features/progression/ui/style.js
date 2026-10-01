@@ -112,7 +112,7 @@ export const CSS = `
    away from the touch controls */
 .pg-hud-flasks { position: absolute; left: calc(50% - 246px); transform: translateX(-100%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 48px);
 	display: flex; gap: 6px; align-items: flex-end; pointer-events: none; }
-@media (max-width: 820px), (pointer: coarse) {
+@media (max-width: 1100px), (pointer: coarse) {
 	.pg-hud-flasks { left: max(10px, env(safe-area-inset-left)); top: calc(max(8px, env(safe-area-inset-top)) + 122px); bottom: auto; transform: none; align-items: flex-start; }
 	.pg-hud-flasks .pg-buffs, .pg-hud-flasks .pg-points { order: 1; }
 }

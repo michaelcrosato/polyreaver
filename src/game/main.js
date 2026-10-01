@@ -10,6 +10,7 @@ import * as THREE from 'three/webgpu';
 import { createDevice } from '../gpu.js';
 import './sim-entry.js';
 import './render/placeholder.js';
+import './render/post.js';
 import './features/creatures/client.js';
 import './features/combat/client.js';
 import './features/monsters/client.js';
