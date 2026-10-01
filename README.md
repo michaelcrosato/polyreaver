@@ -372,6 +372,9 @@ src/post.js             post-processing graph (RenderPipeline + TSL nodes)
 src/cel.js              Wind Waker / Jet Set Radio cel-shading lighting model
 src/features.js         every setting with its cost and teaching note (drives the UI)
 src/bench.js            max-crowd, effect-cost and steady-state benchmarks
+src/bench-standard.js   standard benchmark (fixed 1080p, whole crowd in view, score)
+src/ballast.js          fixed dummy GPU load that keeps clocks up while measuring
+src/results.js          "Results from all devices" panel (artifact database runs)
 src/bridge.js           Claude link (artifact database command runner)
 src/ui.js, input.js     settings panel, HUD graph, keyboard / touch controls
 scripts/                post-build copy, README table generator, smoke test
@@ -407,4 +410,5 @@ scripts/                post-build copy, README table generator, smoke test
   while `motionBlur()` steps in UV space (y down), so motion blur converts it the way TRAA does
   (otherwise diagonal motion smears along the mirrored diagonal, at twice the length).
 * Built and smoke-tested in headless Chromium with a software WebGPU adapter (SwiftShader). That
-  checks correctness, not speed, so all real performance numbers have to come from real devices.
+  checks correctness, not speed, so all real performance numbers have to come from real devices -
+  the numbers quoted here were measured on an RTX 3060 Ti through the Claude link.

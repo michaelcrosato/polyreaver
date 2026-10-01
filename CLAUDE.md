@@ -20,7 +20,9 @@ rendering/physics, the full one before merging a large change. CI runs the full 
   and meshes in `materials.js`, animation systems in `anim.js`/`clips.js`, collisions in `collide.js`.
 - `src/physics.js` PhysicsDemo; `src/physics/*` modules taking `demo`.
 - `src/world.js` World; `src/world/*` modules taking `world`.
-- `src/features.js` every setting (+ teaching text) → UI; `src/post.js` post chain; `src/bench.js`.
+- `src/crowd/motion.js` per-agent motion vectors; `cull.js` also culls shadow casters (GPU path, layer 3).
+- `src/features.js` every setting (+ teaching text) → UI; `src/post.js` post chain; `src/bench.js`
+  (+ `bench-standard.js` fixed-condition benchmark, `ballast.js` clock-keeping load, `results.js` panel).
 - `src/bridge.js` Claude link (see below).
 
 ## Conventions and hard constraints
