@@ -83,7 +83,7 @@ export const SECTIONS = [
 				info: 'Shadow mapping renders the scene a second time from the sun into a depth texture, then every lit pixel samples it. With the crowd casting, the vertex work DOUBLES: every agent is drawn twice. Bigger maps and soft filters add fill and sampling cost.',
 				mobile: 'Real-time shadows for thousands of characters are one of the most expensive things you can turn on for a phone. Use blob shadows instead, or only let nearby agents cast.'
 			},
-			{ key: 'crowdShadows', label: 'Crowd casts shadows', type: 'toggle', def: true, cost: 3, bound: 'vertex', info: 'When off, only the props cast shadows and the crowd only receives them - the shadow pass no longer re-draws every agent.' },
+			{ key: 'crowdShadows', label: 'Crowd casts shadows', type: 'toggle', def: true, cost: 3, bound: 'vertex', info: 'When off, only the props cast shadows and the crowd only receives them - the shadow pass no longer re-draws every agent. GPU-driven mode culls the casters separately against the sun, so agents just off screen still cast into view and agents whose shadow cannot be seen are skipped. Casters keep the LOD the camera picked, so each shadow matches its body. The caster lists add 32 bytes per agent for each model tier in use.' },
 			{ key: 'blobShadows', label: 'Blob shadows (fake)', type: 'toggle', def: false, cost: 1, bound: 'fill', info: 'A soft dark quad under each agent: 2 triangles and a little alpha blending. The classic cheap crowd shadow (used by nearly every game with big crowds).', mobile: 'Almost free - the best value visual upgrade on this list.' },
 			{
 				key: 'pointLights', label: 'Point lights (street lamps)', type: 'select', def: 0, cost: 3, bound: 'fill / compile',

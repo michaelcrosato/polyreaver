@@ -13,7 +13,8 @@
 //
 // Two render paths:
 //   DIRECT     - one instanced draw call for the whole crowd.
-//   GPU-DRIVEN - compute frustum-cull + LOD selection + drawIndexedIndirect per LOD.
+//   GPU-DRIVEN - compute frustum-cull + LOD selection + drawIndexedIndirect per LOD;
+//                shadow casters are culled separately against the sun (cull.js).
 //
 // Code layout:
 //   crowd.js      the Crowd class: buffers, options, per-frame dispatch, stats, readbacks
@@ -28,7 +29,7 @@ import { getModels } from './models.js';
 import { makeClipTable, makeProcTable, animMemory } from './anim.js';
 import { CLIP_RATE } from './clips.js';
 import { buildComputes, MAX_PROXIES } from './sim.js';
-import { ensureLodBuffers, buildCull, updateCullUniforms, maybeReadback } from './cull.js';
+import { ensureLodBuffers, buildCull, updateCullUniforms, maybeReadback, cullMemory } from './cull.js';
 import { vertexNode, vat, makeMaterial, makeBlobMaterial, rebuildMeshes } from './materials.js';
 
 export { withPreviousPosition } from './materials.js';
@@ -56,6 +57,7 @@ export class Crowd {
 		this.blobShadows = false;
 		this.castShadow = false;
 		this.receiveShadow = false;
+		this.shadowLight = null; // the sun: GPU-driven shadow casters are culled against its shadow camera
 		this.lodEnabled = true;
 		this.motionVectors = 'root'; // 'camera' | 'root' | 'full' - velocity buffer source (motion.js)
 		this.materialFactory = null; // optional ( kind ) => material, supplied by the app (cel shading)
@@ -89,6 +91,7 @@ export class Crowd {
 			proxyRadius: uniform( 18 ),
 			// culling / LOD
 			planes: [ 0, 1, 2, 3, 4, 5 ].map( () => uniform( new THREE.Vector4() ) ),
+			shadowPlanes: Array.from( { length: 12 }, () => uniform( new THREE.Vector4() ) ), // sun frustum + swept view (cull.js)
 			camPos: uniform( new THREE.Vector3() ),
 			isOrtho: uniform( 1 ),
 			pxScale: uniform( 100 ),
@@ -110,6 +113,7 @@ export class Crowd {
 
 		this.meshes = [];
 		this.visibleByTier = [ 0, 0, 0, 0 ];
+		this.castersByTier = [ 0, 0, 0, 0 ];
 		this._readbackPending = false;
 		this._lastReadback = 0;
 
@@ -138,6 +142,7 @@ export class Crowd {
 		this.rapierIO = null;
 		this.lodBufs = null;
 		this.lodGeos = null;
+		this.casterBufs = null;
 		this._needsInit = true;
 		this._buildComputes();
 		this._rebuildMeshes();
@@ -258,7 +263,9 @@ export class Crowd {
 			if ( key in options && options[ key ] !== this[ key ] ) {
 
 				this[ key ] = options[ key ];
-				for ( const m of this.meshes ) if ( m.userData.kind === 'crowd' ) m[ key ] = this[ key ];
+				// GPU-driven: separate sun-culled meshes do the casting, so (re)build them
+				if ( key === 'castShadow' && this.path === 'gpu' ) rebuild = true;
+				else for ( const m of this.meshes ) if ( m.userData.kind === 'crowd' ) m[ key ] = this[ key ];
 
 			}
 
@@ -354,8 +361,11 @@ export class Crowd {
 
 			this._updateCullUniforms( camera, viewportHeight );
 			computes.push( this.resetCompute );
-			const passes = this.tier >= 2 ? this.cullPasses : this.cullPasses.slice( 0, 1 );
-			for ( const pass of passes ) {
+			const used = ( list ) => ( this.tier >= 2 ? list : list.slice( 0, 1 ) );
+			const passes = used( this.cullPasses );
+			// shadow casters: a second cull against the sun, only while the crowd casts
+			const casters = this.castShadow && this.casterBufs ? used( this.casterPasses ) : [];
+			for ( const pass of [ ...passes, ...casters ] ) {
 
 				pass.count = this.count;
 				computes.push( pass );
@@ -431,10 +441,32 @@ export class Crowd {
 
 		}
 
+		// Shadow pass: the direct path re-draws the whole crowd, the GPU-driven path
+		// draws what its sun-frustum cull kept.
+		let shadowTris = 0, shadowDraws = 0, casters = 0;
+		if ( this.castShadow && this.path === 'direct' ) {
+
+			shadowTris = this.count * this.models[ this.tier ].triangles;
+			shadowDraws = 1;
+
+		} else if ( this.castShadow ) {
+
+			for ( let k = 0; k <= this.tier; k ++ ) {
+
+				shadowTris += this.castersByTier[ k ] * this.models[ k ].triangles;
+				casters += this.castersByTier[ k ];
+
+			}
+
+			shadowDraws = this.tier + 1;
+
+		}
+
 		return {
-			tris, instances, draws, visibleByTier: this.visibleByTier.slice(),
+			tris, instances, draws, visibleByTier: this.visibleByTier.slice(), shadowTris, shadowDraws, casters,
 			animBytes: animMemory( this.animSystem, Math.min( this.count, this.skeletalLimit ), this.models.slice( 0, this.tier + 1 ) ),
-			collideBytes: this.collider ? this.collider.memoryBytes : 0
+			collideBytes: this.collider ? this.collider.memoryBytes : 0,
+			cullBytes: cullMemory( this )
 		};
 
 	}
@@ -457,8 +489,8 @@ export class Crowd {
 
 		const attrs = this.renderer._attributes;
 		if ( ! attrs || ! this.renderBuf ) return;
-		const list = [ this.renderBuf, this.simBuf, this.animBuf, this.boneBuf, ...( this.lodBufs || [] ), ...( this.lodAnimBufs || [] ) ]
-			.filter( Boolean ).map( ( n ) => n.value );
+		const list = [ this.renderBuf, this.simBuf, this.animBuf, this.boneBuf, ...( this.lodBufs || [] ), ...( this.lodAnimBufs || [] ),
+			...( this.casterBufs || [] ), ...( this.casterAnimBufs || [] ) ].filter( Boolean ).map( ( n ) => n.value );
 		if ( this.drawArgs ) list.push( this.drawArgs );
 		for ( const a of list ) {
 
