@@ -19,11 +19,15 @@ const when = ( iso ) => {
 
 };
 
-function deviceLabel( run, thisDevice ) {
+// `devices` (id -> devices/<id> document) names runs saved before runs carried
+// the GPU name themselves.
+function deviceLabel( run, thisDevice, devices ) {
 
-	const name = run.gpu || 'device ' + String( run.device || '?' ).slice( 0, 6 );
-	const kind = run.deviceKind ? ` (${run.deviceKind})` : '';
-	return esc( name + kind ) + ( run.device === thisDevice ? ' <span class="dim">· this one</span>' : '' );
+	const dev = devices[ run.device ] || {};
+	const name = run.gpu || dev.gpu || 'device ' + String( run.device || '?' ).slice( 0, 6 );
+	const kind = run.deviceKind || dev.kind ? ` (${run.deviceKind || dev.kind})` : '';
+	return esc( name + kind ) + ( run.device === thisDevice ? ' <span class="dim">· this one</span>' : '' ) +
+		`<br><span class="dim">${esc( when( run.at ) )}</span>`;
 
 }
 
@@ -44,7 +48,7 @@ function summary( run ) {
 
 }
 
-export function renderRuns( runs, thisDevice ) {
+export function renderRuns( runs, thisDevice, devices = {} ) {
 
 	if ( ! runs.length ) return '<p class="hint">No runs saved yet. Benchmarks you run here (on any device that opens this page) will appear in this list.</p>';
 
@@ -52,13 +56,15 @@ export function renderRuns( runs, thisDevice ) {
 	let html = '';
 	if ( standard.length ) {
 
-		html += '<b>Standard benchmark</b> <span class="dim">(1920×1080, same conditions everywhere)</span>' +
-			'<table><tr><th>Device</th><th>Score</th><th>Direct</th><th>GPU-driven</th><th>Console look</th><th></th></tr>' +
+		html += '<b>Standard benchmark</b> <span class="dim">(1920×1080, same conditions everywhere; agents at 60 fps)</span>' +
+			'<table><tr><th>Device</th><th>Score</th><th>Tetra direct</th><th>Box-man direct</th><th>Box-man GPU + LOD</th><th>Console look</th></tr>' +
 			standard.map( ( r ) => {
 
 				const d = r.data, l = d.looks || {};
-				return `<tr><td>${deviceLabel( r, thisDevice )}</td><td><b>${esc( d.score )}</b></td><td>${count( d.direct?.agents )}</td><td>${count( d.gpuDriven?.agents )}${d.gpuDriven?.hitCapacity ? '+' : ''}</td>` +
-					`<td>${esc( l.fps )} fps${num( l.gpuMs ) !== null ? ` · ${esc( l.gpuMs )} ms GPU` : ''}</td><td class="dim">${esc( when( r.at ) )}</td></tr>`;
+				const cap = ( t ) => t?.hitCapacity ? '+' : '';
+				return `<tr><td>${deviceLabel( r, thisDevice, devices )}</td><td><b>${esc( d.score )}</b></td><td>${count( d.direct?.agents )}${cap( d.direct )}</td>` +
+					`<td>${d.boxDirect ? count( d.boxDirect.agents ) + cap( d.boxDirect ) : '<span class="dim">v1</span>'}</td><td>${count( d.gpuDriven?.agents )}${cap( d.gpuDriven )}</td>` +
+					`<td>${esc( l.fps )} fps${num( l.gpuMs ) !== null ? ` · ${esc( l.gpuMs )} ms GPU` : ''}</td></tr>`;
 
 			} ).join( '' ) + '</table>';
 
@@ -68,7 +74,7 @@ export function renderRuns( runs, thisDevice ) {
 	if ( other.length ) {
 
 		html += '<b>Other runs</b> <span class="dim">(your settings at the time, so not directly comparable)</span>' +
-			'<table>' + other.map( ( r ) => `<tr><td>${deviceLabel( r, thisDevice )}</td><td>${summary( r )}</td><td class="dim">${esc( when( r.at ) )}</td></tr>` ).join( '' ) + '</table>';
+			'<table>' + other.map( ( r ) => `<tr><td>${deviceLabel( r, thisDevice, devices )}</td><td>${summary( r )}</td></tr>` ).join( '' ) + '</table>';
 
 	}
 

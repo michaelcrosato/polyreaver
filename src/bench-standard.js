@@ -11,16 +11,23 @@
 //   * default settings, except what each test changes.
 //
 // Tests:
-//   1. Crowd, direct path, Tetra model: most agents that fit the 60 fps budget.
-//   2. Crowd, GPU-driven path, Box-man model with LOD: the same.
-//   3. Looks: the Console preset (PBR, shadows, SSAO, bloom, SMAA...) with 50,000
+//   1. Crowd, direct path, Tetra model (24 triangles): most agents that fit the
+//      60 fps budget. Many tiny instances.
+//   2. Crowd, direct path, Box-man (168 triangles): the same with 7x the vertex work.
+//   3. Crowd, GPU-driven path, Box-man with LOD. With the whole crowd in view almost
+//      everyone is a few pixels tall, so LOD draws them as Tetras: compare with
+//      test 2 for what LOD buys, and with test 1 for what the cull pass costs (on
+//      a Snapdragon 8 Elite tests 1 and 3 landed on the same number).
+//   4. Looks: the Console preset (PBR, shadows, SSAO, bloom, SMAA...) with 50,000
 //      agents: frame / GPU / CPU time.
-// The headline score is test 1 in thousands of agents.
+// The headline score is test 1 in thousands of agents. Phones slow down as they
+// warm up (the same phone scored 295, then 263 twenty minutes later), so compare
+// runs started cool.
 
 import { defaults, formatCount } from './features.js';
 import { describeAdapter } from './gpu.js';
 
-export const STANDARD = { version: 1, width: 1920, height: 1080, targetFps: 60, looksPreset: 'console', looksAgents: 50000 };
+export const STANDARD = { version: 2, width: 1920, height: 1080, targetFps: 60, looksPreset: 'console', looksAgents: 50000 };
 
 const r1 = ( v ) => v ? Number( v.toFixed( 1 ) ) : v;
 
@@ -42,22 +49,27 @@ export async function runStandard( bench ) {
 
 		const base = defaults();
 
-		app.applyAll( { ...base, count: 5000 } );
-		const direct = await bench.searchCrowd( STANDARD.targetFps, ( h ) => show( '1/3 Crowd: direct path, Tetra', h ) );
-		done.push( `1. Direct path, Tetra: <b>${formatCount( direct.maxAgents )}</b> agents${direct.hitCapacity ? ' (buffer limit)' : ''}` );
+		const crowdTest = async ( n, label, settings ) => {
 
-		app.applyAll( { ...base, path: 'gpu', tier: 2, count: 5000 } );
-		const gpu = await bench.searchCrowd( STANDARD.targetFps, ( h ) => show( '2/3 Crowd: GPU-driven path, Box-man + LOD', h ) );
-		done.push( `2. GPU-driven, Box-man + LOD: <b>${formatCount( gpu.maxAgents )}</b> agents${gpu.hitCapacity ? ' (buffer limit)' : ''}` );
+			app.applyAll( { ...base, ...settings, count: 5000 } );
+			const r = await bench.searchCrowd( STANDARD.targetFps, ( h ) => show( `${n}/4 Crowd: ${label}`, h ) );
+			done.push( `${n}. ${label}: <b>${formatCount( r.maxAgents )}</b> agents${r.hitCapacity ? ' (buffer limit)' : ''}` );
+			return r;
+
+		};
+
+		const direct = await crowdTest( 1, 'direct path, Tetra', {} );
+		const boxDirect = await crowdTest( 2, 'direct path, Box-man', { tier: 2 } );
+		const gpu = await crowdTest( 3, 'GPU-driven, Box-man + LOD', { path: 'gpu', tier: 2 } );
 
 		app.applyAll( { ...base, count: STANDARD.looksAgents } );
 		app.preset( STANDARD.looksPreset );
-		show( `3/3 Looks: ${STANDARD.looksPreset} preset, ${formatCount( STANDARD.looksAgents )} agents`, 'measuring…' );
+		show( `4/4 Looks: ${STANDARD.looksPreset} preset, ${formatCount( STANDARD.looksAgents )} agents`, 'measuring…' );
 		const m = await bench._measure( 1500, 3000 );
 		const s = [ ...bench.samples ].sort( ( a, b ) => a - b );
 		const p99 = s[ Math.min( s.length - 1, Math.floor( 0.99 * s.length ) ) ];
 		const looks = { preset: STANDARD.looksPreset, agents: STANDARD.looksAgents, fps: r1( m.fps ), frameMs: r1( m.frame ), p99Ms: r1( p99 ), gpuMs: r1( m.gpu ), cpuMs: r1( m.cpu ) };
-		done.push( `3. Console look, ${formatCount( STANDARD.looksAgents )} agents: <b>${looks.fps} fps</b>` + ( m.gpu ? ` · GPU ${looks.gpuMs} ms` : '' ) + ` · CPU ${looks.cpuMs} ms · worst 1 % ${looks.p99Ms} ms` );
+		done.push( `4. Console look, ${formatCount( STANDARD.looksAgents )} agents: <b>${looks.fps} fps</b>` + ( m.gpu ? ` · GPU ${looks.gpuMs} ms` : '' ) + ` · CPU ${looks.cpuMs} ms · worst 1 % ${looks.p99Ms} ms` );
 
 		result = {
 			version: STANDARD.version,
@@ -67,12 +79,15 @@ export async function runStandard( bench ) {
 			gpu: describeAdapter( app.gpu.info ),
 			judgedBy: direct.judgedBy,
 			direct: { agents: direct.maxAgents, hitCapacity: direct.hitCapacity, triangles: direct.trianglesPerFrame },
+			boxDirect: { agents: boxDirect.maxAgents, hitCapacity: boxDirect.hitCapacity, triangles: boxDirect.trianglesPerFrame },
 			gpuDriven: { agents: gpu.maxAgents, hitCapacity: gpu.hitCapacity },
-			looks
+			looks,
+			// each search's steps, so an odd result can be explained afterwards
+			logs: { direct: direct.log, boxDirect: boxDirect.log, gpuDriven: gpu.log }
 		};
 		bench.results.standard = result;
 		bench.onResult?.( 'standard', result );
-		show( null, `<br><b>Score: ${result.score}</b> <span class="dim">(thousands of Tetra agents at ${STANDARD.targetFps} fps, test 1${direct.judgedBy === 'frame time' ? '; no GPU timestamps here, so judged by frame time - capped by the display refresh rate' : ''})</span>` );
+		show( null, `<br><b>Score: ${result.score}</b> <span class="dim">(v${STANDARD.version}: thousands of Tetra agents at ${STANDARD.targetFps} fps, test 1${direct.judgedBy === 'frame time' ? '; no GPU timestamps here, so judged by frame time - capped by the display refresh rate' : ''})</span>` );
 
 	} catch {
 

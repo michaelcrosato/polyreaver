@@ -89,10 +89,33 @@ export class ClaudeLink {
 
 		this.app.bench.onResult = ( kind, data ) => this._record( kind, data );
 
+		// A command this device was running when its tab closed never finishes; mark
+		// it so it does not look as if it is still going.
+		db.collection( 'commands' ).where( 'status', '==', 'running' ).where( 'device', '==', this.device ).get()
+			.then( ( snap ) => snap.docs.forEach( ( d ) => db.doc( 'commands/' + d.id ).update( { status: 'interrupted' } ).catch( () => {} ) ) )
+			.catch( () => {} );
+
 		// every device's saved benchmarks, newest first, for the comparison panel
+		this.runs = [];
+		this.devices = {};
+		const showRuns = () => this.app.ui.setResults( renderRuns( this.runs, this.device, this.devices ) );
 		this.unsubscribeRuns = db.collection( 'runs' ).orderBy( 'at', 'desc' ).limit( 60 ).onSnapshot(
-			( snap ) => this.app.ui.setResults( renderRuns( snap.docs.map( ( d ) => d.data() ), this.device ) ),
+			( snap ) => {
+
+				this.runs = snap.docs.map( ( d ) => d.data() );
+				showRuns();
+
+			},
 			() => this.app.ui.setResults( null )
+		);
+		this.unsubscribeDevices = db.collection( 'devices' ).onSnapshot(
+			( snap ) => {
+
+				this.devices = Object.fromEntries( snap.docs.map( ( d ) => [ d.id, d.data() ] ) );
+				showRuns();
+
+			},
+			() => {}
 		);
 
 		this.unsubscribe = db.collection( 'commands' ).where( 'status', '==', 'pending' ).onSnapshot(

@@ -34,8 +34,9 @@ export function buildReport( app ) {
 		const st = r.standard;
 		lines.push( '', `Standard benchmark v${st.version} (${st.resolution}, whole crowd in view, ${st.targetFps} fps budget, judged by ${st.judgedBy}): score ${st.score}`,
 			`  1. direct path, Tetra: ${st.direct.agents} agents${st.direct.hitCapacity ? ' (buffer limit)' : ''}`,
-			`  2. GPU-driven, Box-man + LOD: ${st.gpuDriven.agents} agents${st.gpuDriven.hitCapacity ? ' (buffer limit)' : ''}`,
-			`  3. ${st.looks.preset} look, ${st.looks.agents} agents: ${st.looks.fps} fps, frame ${st.looks.frameMs} ms, GPU ${st.looks.gpuMs ?? 'n/a'} ms, CPU ${st.looks.cpuMs} ms, worst 1% ${st.looks.p99Ms} ms` );
+			`  2. direct path, Box-man: ${st.boxDirect.agents} agents${st.boxDirect.hitCapacity ? ' (buffer limit)' : ''}`,
+			`  3. GPU-driven, Box-man + LOD: ${st.gpuDriven.agents} agents${st.gpuDriven.hitCapacity ? ' (buffer limit)' : ''}`,
+			`  4. ${st.looks.preset} look, ${st.looks.agents} agents: ${st.looks.fps} fps, frame ${st.looks.frameMs} ms, GPU ${st.looks.gpuMs ?? 'n/a'} ms, CPU ${st.looks.cpuMs} ms, worst 1% ${st.looks.p99Ms} ms` );
 
 	}
 

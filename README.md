@@ -51,9 +51,14 @@ toward the horizon).
    everything that changes the result: it renders exactly 1920×1080 (letterboxed into the window,
    whatever its size or pixel ratio), uses a fixed camera that shows the whole crowd (zoomed in,
    the GPU-driven path culls almost everyone, so the test would measure the simulation instead of
-   rendering) and starts from default settings. It runs three tests and takes 1-3 minutes:
-   max crowd on the direct path (Tetra), max crowd on the GPU-driven path (Box-man + LOD), and
-   the Console look with 50,000 agents. The score is the first result in thousands of agents.
+   rendering) and starts from default settings. It runs four tests and takes 2-4 minutes: max
+   crowd on the direct path with Tetras (24 triangles) and with Box-men (168), max crowd on the
+   GPU-driven path with Box-men + LOD, and the Console look with 50,000 agents. The score is the
+   first result in thousands of agents. With the whole crowd in view nearly everyone is a few
+   pixels tall, so LOD draws them as Tetras: test 3 against test 2 shows what LOD buys, test 3
+   against test 1 what the cull pass costs. Phones slow down as they warm up (a Snapdragon 8
+   Elite scored 295, then 263 twenty minutes later), so compare runs started cool. Each test's
+   search steps are saved with the result.
    When the page runs as a claude.ai artifact, every device's runs appear side by side under
    *Results from all devices* (see Claude link below).
 2. For your own scene, start from **Bare** (the default: everything off, unlit flat colours, no

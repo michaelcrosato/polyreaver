@@ -93,6 +93,12 @@ function fakeClaude() {
 		where: ( f, op, v ) => collection( path, [ ...filters, [ f, v ] ], order, max ),
 		orderBy: ( f, dir = 'asc' ) => collection( path, filters, [ f, dir ], max ),
 		limit: ( n ) => collection( path, filters, order, n ),
+		get: async () => {
+
+			const docs = [ ...store.docs ].filter( ( [ p, d ] ) => p.startsWith( path + '/' ) && p.split( '/' ).length === path.split( '/' ).length + 1 && filters.every( ( [ f, v ] ) => d[ f ] === v ) ).map( ( [ p, d ] ) => snap( p, d ) );
+			return { docs, size: docs.length, empty: ! docs.length };
+
+		},
 		onSnapshot: ( next ) => {
 
 			const depth = path.split( '/' ).length + 1;
@@ -200,7 +206,10 @@ for ( const [ i, sc ] of scenarios.entries() ) {
 		// a saved run from "another device", with markup in a field: the results
 		// panel must show it as text
 		db.docs.set( 'runs/r1', { kind: 'standard', device: 'other', gpu: '<img src=x id=xss>Test GPU', deviceKind: 'desktop', at: new Date().toISOString(),
-			data: { version: 1, score: 1234, direct: { agents: 1234000 }, gpuDriven: { agents: 4194304, hitCapacity: true }, looks: { fps: 60, gpuMs: 3.2 } } } );
+			data: { version: 2, score: 1234, direct: { agents: 1234000 }, boxDirect: { agents: 222000 }, gpuDriven: { agents: 4194304, hitCapacity: true }, looks: { fps: 60, gpuMs: 3.2 } } } );
+		// an older run without a GPU name: the panel should name it from devices/
+		db.docs.set( 'devices/old-device', { gpu: 'Old Named GPU', kind: 'desktop' } );
+		db.docs.set( 'runs/r0', { kind: 'maxCrowd', device: 'old-device', at: '2026-01-01T00:00:00Z', data: { targetFps: 60, maxAgents: 5000, model: 'tetra', path: 'direct' } } );
 
 	} );
 	const res = await page.waitForFunction( () => {
@@ -219,12 +228,13 @@ for ( const [ i, sc ] of scenarios.entries() ) {
 		else if ( ! ( steps[ 2 ].result.bytes > 20000 ) ) logs.push( 'screenshot looks blank: ' + steps[ 2 ].result.bytes + ' bytes' );
 		if ( c3.res.ok || c3.cmd.status !== 'error' ) logs.push( 'bad setting was not rejected' );
 		if ( c4.res || c4.cmd.status !== 'pending' ) logs.push( 'command for another device was run' );
-		const runs = await page.evaluate( () => [ ...window.__fakeDb.docs.keys() ].filter( ( k ) => k.startsWith( 'devices/' ) ).length );
+		const runs = await page.evaluate( () => [ ...window.__fakeDb.docs.keys() ].filter( ( k ) => k.startsWith( 'devices/' ) && k !== 'devices/old-device' ).length );
 		if ( runs !== 1 ) logs.push( 'device document missing' );
 		const c5 = await page.evaluate( () => window.__fakeDb.docs.get( 'commands/c5' ).status );
 		if ( c5 !== 'pending' ) logs.push( 'mobile-only command was run on a desktop' );
 		const panel = await page.evaluate( () => ( { text: window.app.ui.resultsOut.textContent, xss: !! document.getElementById( 'xss' ) } ) );
-		if ( ! panel.text.includes( 'Test GPU' ) || ! panel.text.includes( '1234' ) ) logs.push( 'results panel did not show the saved run: ' + panel.text.slice( 0, 120 ) );
+		if ( ! panel.text.includes( 'Test GPU' ) || ! panel.text.includes( '1234' ) || ! panel.text.includes( '222k' ) ) logs.push( 'results panel did not show the saved run: ' + panel.text.slice( 0, 160 ) );
+		if ( ! panel.text.includes( 'Old Named GPU' ) ) logs.push( 'results panel did not name an old run from devices/' );
 		if ( panel.xss ) logs.push( 'results panel rendered markup from the database' );
 
 	}
