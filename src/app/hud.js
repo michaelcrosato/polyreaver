@@ -29,6 +29,16 @@ export function buildReport( app ) {
 		...( changed.length ? changed : [ '  (none - bare baseline)' ] )
 	];
 	const r = app.bench.results;
+	if ( r.standard ) {
+
+		const st = r.standard;
+		lines.push( '', `Standard benchmark v${st.version} (${st.resolution}, whole crowd in view, ${st.targetFps} fps budget, judged by ${st.judgedBy}): score ${st.score}`,
+			`  1. direct path, Tetra: ${st.direct.agents} agents${st.direct.hitCapacity ? ' (buffer limit)' : ''}`,
+			`  2. GPU-driven, Box-man + LOD: ${st.gpuDriven.agents} agents${st.gpuDriven.hitCapacity ? ' (buffer limit)' : ''}`,
+			`  3. ${st.looks.preset} look, ${st.looks.agents} agents: ${st.looks.fps} fps, frame ${st.looks.frameMs} ms, GPU ${st.looks.gpuMs ?? 'n/a'} ms, CPU ${st.looks.cpuMs} ms, worst 1% ${st.looks.p99Ms} ms` );
+
+	}
+
 	if ( r.crowd ) {
 
 		lines.push( '', `Max crowd @ ${r.crowd.targetFps} fps: ${r.crowd.maxAgents} agents (~${formatCount( r.crowd.trianglesPerFrame )} crowd tris), model ${r.crowd.model}, path ${r.crowd.path}` );
@@ -38,11 +48,11 @@ export function buildReport( app ) {
 
 	if ( r.fx ) {
 
-		lines.push( '', 'Effect costs (GPU ms delta where available, else frame ms delta):' );
+		lines.push( '', 'Effect costs (GPU ms delta where available, else frame ms delta; CPU ms delta):' );
+		const sign = ( d ) => ( d >= 0 ? '+' : '' ) + d.toFixed( 2 );
 		for ( const row of [ ...r.fx ].sort( ( a, b ) => ( b.gpuDelta ?? b.frameDelta ) - ( a.gpuDelta ?? a.frameDelta ) ) ) {
 
-			const d = row.gpuDelta ?? row.frameDelta;
-			lines.push( `  ${row.label.padEnd( 34 )} ${( d >= 0 ? '+' : '' ) + d.toFixed( 2 )} ms  (${row.fps.toFixed( 0 )} fps)` );
+			lines.push( `  ${row.label.padEnd( 34 )} GPU ${sign( row.gpuDelta ?? row.frameDelta )} ms  CPU ${sign( row.cpuDelta ?? 0 )} ms  (${row.fps.toFixed( 0 )} fps)` );
 
 		}
 
@@ -66,8 +76,14 @@ export function updateHud( app ) {
 	const info = app.renderer.info;
 	const w = app.renderer.domElement.width, hgt = app.renderer.domElement.height;
 	const fpsClass = s.fps >= 55 ? 'good' : s.fps >= 28 ? 'ok' : 'bad';
+	// A GPU that is busy for well under half the frame drops to power-saving clocks,
+	// and its timings then swing by several ms between identical frames. Say so,
+	// rather than let the number be read as a cost.
+	const gpuMs = s.gpuRender + s.gpuCompute;
+	const idle = gpuMs > 0 && s.frameMs > 0 && gpuMs < s.frameMs * 0.25;
 	const gpuLine = g.timestamps
-		? `GPU <b>${( s.gpuRender + s.gpuCompute ).toFixed( 2 )}</b> ms <span class="dim">(render ${s.gpuRender.toFixed( 2 )} + compute ${s.gpuCompute.toFixed( 2 )})</span>`
+		? `GPU <b>${gpuMs.toFixed( 2 )}</b> ms <span class="dim">(render ${s.gpuRender.toFixed( 2 )} + compute ${s.gpuCompute.toFixed( 2 )})</span>` +
+			( idle ? '<div class="dim x">GPU mostly idle: clocks drop, so this number jumps around. Compare costs under load (Effect costs does this for you).</div>' : '' )
 		: '<span class="dim">GPU timing unavailable (no timestamp-query)</span>';
 	const vis = S.path === 'gpu' ? ` · visible <b>${formatCount( cs.instances )}</b> <span class="dim">[${cs.visibleByTier.slice( 0, Number( S.tier ) + 1 ).map( formatCount ).join( '/' )}]</span>` : '';
 	let phys = '';

@@ -38,7 +38,8 @@ with capabilities `db`, `user`, `assets`). When the user has it open, queue work
 tool: `set` `commands/<id>` = `{ "cmd": "...", "args": {...}, "status": "pending" }`, then read
 `results/<id>` (and `commands/<id>.status`). Commands: `ping`, `report`, `settings`, `preset {id}`,
 `set {values}`, `reset {keepCount}`, `measure {seconds}`, `maxCrowd {targetFps}`, `effects`,
-`screenshot` (asset id → `Artifact` read with `path`), `sequence {steps, continueOnError}`.
+`screenshot` (asset id → `Artifact` read with `path`), `standard` (fixed-condition benchmark, 1-3 min),
+`sequence {steps, continueOnError}`. Optional `target: "mobile"|"desktop"` waits for that kind of device.
 `devices/*` lists devices that opened it; `runs/*` holds benchmarks the user ran from the panel.
 The tab must be in the foreground; results can take a while (`effects` ≈ 1-2 min).
 Measuring: a lightly loaded desktop GPU drops its clocks and its timestamps become noise (±4 ms). Compare

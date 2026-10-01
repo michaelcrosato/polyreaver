@@ -62,6 +62,7 @@ export class CameraRig {
 
 	get camera() {
 
+		if ( this.benchRadius ) return this.ortho;
 		return ( this.mode === 'iso' || this.mode === 'top' ) ? this.ortho : this.persp;
 
 	}
@@ -139,13 +140,50 @@ export class CameraRig {
 	// Visible half-extent on the ground (used for shadow / fog / LOD sizing).
 	get viewExtent() {
 
+		if ( this.benchRadius ) return this.benchRadius() * 1.1;
 		if ( this.isOrtho ) return this.viewHeight * Math.max( 1, this.aspect ) * 0.75;
 		if ( this.mode === 'eye' ) return 120;
 		return Math.min( 400, this.distance * 2.2 );
 
 	}
 
+	// Benchmark view: a fixed isometric framing of the whole crowd, centred on the
+	// plaza, at a fixed angle and with no smoothing, so every run on every device
+	// draws the same picture whatever the player was doing. `radius` is a function
+	// (the crowd's radius) so the framing follows the crowd as a benchmark resizes
+	// it; pass null to give the camera back to the player.
+	setBenchView( radius ) {
+
+		this.benchRadius = radius;
+
+	}
+
+	_updateBench() {
+
+		const cam = this.ortho;
+		const r = this.benchRadius();
+		this.focus.set( 0, 0, 0 ); // sun shadows and fog follow the focus point
+		const cp = Math.cos( ISO_PITCH ), sp = Math.sin( ISO_PITCH ), yaw = Math.PI / 4;
+		// a ground disc of radius r spans 2r across the screen and 2r·sin(pitch) up it
+		const h = Math.max( r * sp, r / this.aspect ) * 1.08;
+		cam.left = - h * this.aspect;
+		cam.right = h * this.aspect;
+		cam.top = h;
+		cam.bottom = - h;
+		const D = 2000;
+		cam.position.set( D * cp * Math.sin( yaw ), D * sp, D * cp * Math.cos( yaw ) );
+		cam.near = 1;
+		cam.far = D * 2 + 500;
+		cam.up.set( 0, 1, 0 );
+		cam.lookAt( 0, 0, 0 );
+		cam.updateProjectionMatrix();
+		cam.updateMatrixWorld();
+
+	}
+
 	update( dt, heroPos, heroHeading ) {
+
+		if ( this.benchRadius ) return this._updateBench();
 
 		// Target point: hero + optional pan offset.
 		const target = new THREE.Vector3( heroPos.x, 0, heroPos.z ).add( this.panOffset );

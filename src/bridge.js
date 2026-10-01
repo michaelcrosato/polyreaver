@@ -15,6 +15,8 @@
 
 import { defaults, PRESETS } from './features.js';
 import { describeAdapter } from './gpu.js';
+import { IS_MOBILE } from './app/config.js';
+import { renderRuns } from './results.js';
 
 const LEASE_MS = 10 * 60 * 1000;
 
@@ -54,6 +56,7 @@ export class ClaudeLink {
 		this.db = null;
 		this.assets = null;
 		this.device = deviceId();
+		this._kind = IS_MOBILE ? 'mobile' : 'desktop';
 		this.seen = new Set();
 		this.queue = Promise.resolve();
 		this._capture = null;
@@ -86,6 +89,12 @@ export class ClaudeLink {
 
 		this.app.bench.onResult = ( kind, data ) => this._record( kind, data );
 
+		// every device's saved benchmarks, newest first, for the comparison panel
+		this.unsubscribeRuns = db.collection( 'runs' ).orderBy( 'at', 'desc' ).limit( 60 ).onSnapshot(
+			( snap ) => this.app.ui.setResults( renderRuns( snap.docs.map( ( d ) => d.data() ), this.device ) ),
+			() => this.app.ui.setResults( null )
+		);
+
 		this.unsubscribe = db.collection( 'commands' ).where( 'status', '==', 'pending' ).onSnapshot(
 			( snap ) => {
 
@@ -94,6 +103,9 @@ export class ClaudeLink {
 					if ( this.seen.has( doc.id ) ) continue;
 					const body = doc.data();
 					if ( body.device && body.device !== this.device ) continue;
+					// `target` picks a kind of device: a command queued for "mobile" waits
+					// until a phone or tablet opens the page
+					if ( body.target && body.target !== this._kind ) continue;
 					this.seen.add( doc.id );
 					this.queue = this.queue.then( () => this._claimAndRun( doc.id, body ) );
 
@@ -121,6 +133,7 @@ export class ClaudeLink {
 		const g = this.app.gpu;
 		return {
 			gpu: describeAdapter( g.info ),
+			kind: this._kind,
 			vendor: g.info?.vendor || '',
 			architecture: g.info?.architecture || '',
 			featureLevel: g.featureLevel,
@@ -196,6 +209,7 @@ export class ClaudeLink {
 			case 'measure': return this._measure( args );
 			case 'maxCrowd': return this._maxCrowd( args );
 			case 'effects': return this._effects();
+			case 'standard': return this._standard();
 			case 'screenshot': return this._screenshot();
 
 			case 'sequence': {
@@ -299,7 +313,16 @@ export class ClaudeLink {
 		await this.app.bench.measureEffects();
 		const r = this.app.bench.results.fx;
 		if ( ! r ) throw new Error( 'effects run was stopped' );
-		return { warmLoadMs: round( this.app.bench.warmLoad ), rows: r.map( ( row ) => ( { label: row.label, fps: round( row.fps, 1 ), frameDelta: round( row.frameDelta ), gpuDelta: round( row.gpuDelta ) } ) ) };
+		return { warmLoadMs: round( this.app.bench.warmLoad ), rows: r.map( ( row ) => ( { label: row.label, fps: round( row.fps, 1 ), frameDelta: round( row.frameDelta ), gpuDelta: round( row.gpuDelta ), cpuDelta: round( row.cpuDelta ) } ) ) };
+
+	}
+
+	async _standard() {
+
+		if ( this.app.bench.running ) throw new Error( 'a benchmark is already running' );
+		const r = await this.app.bench.standard();
+		if ( ! r ) throw new Error( 'standard benchmark was stopped' );
+		return r;
 
 	}
 
@@ -322,7 +345,7 @@ export class ClaudeLink {
 	_record( kind, data ) {
 
 		if ( ! this.db ) return;
-		const doc = { kind, device: this.device, at: new Date().toISOString(), data, settings: this._changedSettings() };
+		const doc = { kind, device: this.device, gpu: describeAdapter( this.app.gpu.info ), deviceKind: this._kind, at: new Date().toISOString(), data, settings: this._changedSettings() };
 		this.db.doc( 'runs/' + randomId() ).set( JSON.parse( JSON.stringify( doc ) ) ).catch( () => {} );
 
 	}

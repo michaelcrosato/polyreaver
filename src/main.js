@@ -208,8 +208,33 @@ class App {
 
 	}
 
+	// Standard benchmark: render exactly width x height pixels whatever the window
+	// size or pixel ratio, letterboxed into the window. null restores normal sizing.
+	setFixedResolution( res ) {
+
+		this.fixedResolution = res ? { width: res.width, height: res.height } : null;
+		this.resize();
+
+	}
+
 	resize() {
 
+		const st = this.renderer.domElement.style;
+		const fixed = this.fixedResolution;
+		if ( fixed ) {
+
+			const scale = Math.min( innerWidth / fixed.width, innerHeight / fixed.height );
+			this.renderer.setPixelRatio( 1 );
+			this.renderer.setSize( fixed.width, fixed.height, false );
+			Object.assign( st, { position: 'absolute', width: `${ fixed.width * scale }px`, height: `${ fixed.height * scale }px`, left: `${ ( innerWidth - fixed.width * scale ) / 2 }px`, top: `${ ( innerHeight - fixed.height * scale ) / 2 }px` } );
+			this.rig.setAspect( fixed.width / fixed.height );
+			this.pixelRatio = 1;
+			this.post.onResize();
+			return;
+
+		}
+
+		Object.assign( st, { position: '', left: '', top: '' } );
 		const S = this.S;
 		const cap = S.maxDpr === 'native' ? DPR : Math.min( DPR, Number( S.maxDpr ) );
 		const fsr = S.upscaler === 'fsr1' && S.renderScale < 1 && needsPost( S );
@@ -252,6 +277,7 @@ class App {
 			case 'respawn': this._needPhysics() && this.physics.respawn(); break;
 			case 'benchCrowd': this.bench.findMaxCrowd( Number( this.ui.benchTarget.value ) ); break;
 			case 'benchFx': this.bench.measureEffects(); break;
+			case 'benchStandard': this.bench.standard(); break;
 			case 'benchStop': this.bench.stop(); break;
 			case 'report': this._copy( this.report(), 'Report copied to clipboard' ); break;
 			case 'share': this._copy( this.shareLink(), 'Settings link copied' ); break;

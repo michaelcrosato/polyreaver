@@ -47,8 +47,17 @@ toward the horizon).
 
 ## How to use it as a hardware test
 
-1. Start from **Bare** (the default). Everything is off: unlit flat colours, no post-processing.
-2. Open *Benchmark & report* → **Find max crowd** at 30 or 60 fps. It ramps the agent count until
+1. **Standard benchmark** (in *Benchmark & report*) is the one to compare devices with. It pins
+   everything that changes the result: it renders exactly 1920×1080 (letterboxed into the window,
+   whatever its size or pixel ratio), uses a fixed camera that shows the whole crowd (zoomed in,
+   the GPU-driven path culls almost everyone, so the test would measure the simulation instead of
+   rendering) and starts from default settings. It runs three tests and takes 1-3 minutes:
+   max crowd on the direct path (Tetra), max crowd on the GPU-driven path (Box-man + LOD), and
+   the Console look with 50,000 agents. The score is the first result in thousands of agents.
+   When the page runs as a claude.ai artifact, every device's runs appear side by side under
+   *Results from all devices* (see Claude link below).
+2. For your own scene, start from **Bare** (the default: everything off, unlit flat colours, no
+   post-processing) and open *Benchmark & report* → **Find max crowd** at 30 or 60 fps. It ramps the agent count until
    the frame no longer fits the target, then narrows it down. With GPU timestamps (most desktop
    browsers) it judges GPU and CPU time against the frame budget rather than the frame rate,
    because vsync caps the frame rate: on an RTX 3060 Ti every size up to a million agents "ran at
@@ -58,8 +67,10 @@ toward the horizon).
    the extra milliseconds. A mostly idle GPU drops to power-saving clocks and its timings become
    noise (identical runs measured 0.5 and 4.4 ms), so when the scene is light the benchmark first
    adds a fixed dummy compute load (the "ballast", `src/ballast.js`) to keep the clocks up. It
-   costs the same with and without each effect, so it cancels out. Differences under ~0.5 ms are
-   still within the noise.
+   costs the same with and without each effect, so it cancels out. Each effect is measured
+   between two baselines (before and after), which cancels slow drift. The table has a CPU column
+   too: physics and other JavaScript work cost CPU time, not GPU time. Differences under ~0.5 ms
+   are still within the noise.
 4. **Copy report** and paste it somewhere. It includes the GPU/adapter, browser, resolution, all
    non-default settings and both benchmark results. Do the same on each device you care about.
 
@@ -86,7 +97,7 @@ copying anything:
 | `ping` | GPU / browser / screen info and the settings you changed |
 | `preset` `{id}` · `set` `{values}` · `reset` | change settings (keys and value types are checked against the feature list) |
 | `measure` `{seconds}` | steady-state fps, median / p95 / p99 / worst frame time, GPU ms, triangles, draw calls |
-| `maxCrowd` `{targetFps}` · `effects` | the two built-in benchmarks |
+| `standard` · `maxCrowd` `{targetFps}` · `effects` | the built-in benchmarks (standard = fixed 1080p conditions, comparable across devices) |
 | `screenshot` | the current frame, stored as an artifact asset |
 | `report` · `settings` | the same text as *Copy report*, or the full settings object |
 | `sequence` `{steps: [...]}` | run several of the above in order |
@@ -94,8 +105,13 @@ copying anything:
 Benchmarks you start yourself from the panel are recorded as well (`runs/`). Commands live in
 `commands/<id>` with `status: "pending"`, results in `results/<id>`. Only people with edit access
 can queue commands, if several devices have the page open a command is claimed by exactly one of
-them (or by the one named in its `device` field), and nothing from the database is ever run as
-code. Outside claude.ai (dev server, the HTML file from disk) the link is simply off.
+them (or by the one named in its `device` field, or by the first `mobile` / `desktop` device to
+open the page when it has a `target` field), and nothing from the database is ever run as code.
+Outside claude.ai (dev server, the HTML file from disk) the link is simply off.
+
+Every saved run also shows up in the page itself under *Benchmark & report* → *Results from all
+devices*: standard-benchmark scores in one table (comparable), other runs below (made with
+whatever settings were on at the time, so only roughly comparable).
 
 The tab has to stay in the foreground while a command runs: browsers pause background tabs.
 

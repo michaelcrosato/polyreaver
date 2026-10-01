@@ -1,5 +1,6 @@
-// Benchmarks: "how many agents can this device draw at N fps?" and
-// "how many milliseconds does each effect add?".
+// Benchmarks: "how many agents can this device draw at N fps?",
+// "how many milliseconds does each effect add?" and the fixed-condition
+// standard benchmark (bench-standard.js) used to compare devices.
 //
 // Frame time comes from requestAnimationFrame deltas (what the player feels).
 // When the GPU exposes timestamp queries we also record GPU time, which is not
@@ -7,6 +8,7 @@
 
 import { formatCount } from './features.js';
 import { Ballast } from './ballast.js';
+import { runStandard } from './bench-standard.js';
 
 const median = ( arr ) => {
 
@@ -71,7 +73,7 @@ export class Bench {
 		this.samples = [];
 		this.gpuSamples = [];
 		this.cpuSamples = [];
-		this.results = { crowd: null, fx: null };
+		this.results = { crowd: null, fx: null, standard: null };
 		this.onResult = null; // ( kind, data ) => {} - set by the Claude link
 		this.ballast = new Ballast( app.renderer );
 		this.warmLoad = 0; // GPU ms of the current ballast + scene, for the report
@@ -158,12 +160,41 @@ export class Bench {
 
 	}
 
+	standard() {
+
+		return runStandard( this );
+
+	}
+
 	async findMaxCrowd( targetFps ) {
 
 		if ( this.running ) return;
 		this.running = true;
 		const app = this.app;
 		const original = app.S.count;
+		try {
+
+			const r = await this.searchCrowd( targetFps, ( html ) => app.ui.setBenchOutput( html ) );
+			this.results.crowd = r;
+			this.onResult?.( 'maxCrowd', r );
+			app.set( 'count', r.maxAgents || original );
+
+		} catch {
+
+			app.set( 'count', original );
+			app.ui.setBenchOutput( '<b>Max crowd</b><br>stopped.' );
+
+		}
+
+		this.running = false;
+
+	}
+
+	// Ramp the agent count until a frame no longer fits the target, then bisect.
+	// Leaves the crowd at the last size it tried; callers restore what they need.
+	async searchCrowd( targetFps, show ) {
+
+		const app = this.app;
 		const budget = 1000 / targetFps;
 		const maxN = app.hardMaxCapacity;
 		const log = [];
@@ -176,58 +207,47 @@ export class Bench {
 			? ( m ) => m.gpu > 0 && Math.max( m.gpu, m.cpu ) <= budget * 0.9
 			// without timestamps: a frame counts as "on target" within 8 % (rAF jitter)
 			: ( m ) => m.frame <= budget * 1.08;
-		const out = ( extra = '' ) => app.ui.setBenchOutput( `<b>Max crowd @ ${targetFps} fps</b> <span class="dim">(judged by ${byWork ? 'GPU/CPU time' : 'frame time'})</span><br>${log.join( '<br>' )}${extra}` );
-		let good = 0, bad = 0, n = Math.max( 1000, Math.min( original, 5000 ) );
-		try {
+		const out = ( extra = '' ) => show( `<b>Max crowd @ ${targetFps} fps</b> <span class="dim">(judged by ${byWork ? 'GPU/CPU time' : 'frame time'})</span><br>${log.join( '<br>' )}${extra}` );
+		let good = 0, bad = 0, n = Math.max( 1000, Math.min( app.S.count, 5000 ) );
 
-			while ( true ) {
+		while ( true ) {
 
-				n = Math.min( n, maxN );
-				app.set( 'count', n );
-				out( `<br>testing ${formatCount( n )}…` );
-				const m = await this._measure();
-				log.push( `${formatCount( n )} agents: ${m.fps.toFixed( 1 )} fps (frame ${m.frame.toFixed( 1 )} ms${m.gpu ? `, GPU ${m.gpu.toFixed( 1 )} ms` : ''}, CPU ${m.cpu.toFixed( 1 )} ms)` );
-				if ( ok( m ) ) {
+			n = Math.min( n, maxN );
+			app.set( 'count', n );
+			out( `<br>testing ${formatCount( n )}…` );
+			const m = await this._measure();
+			log.push( `${formatCount( n )} agents: ${m.fps.toFixed( 1 )} fps (frame ${m.frame.toFixed( 1 )} ms${m.gpu ? `, GPU ${m.gpu.toFixed( 1 )} ms` : ''}, CPU ${m.cpu.toFixed( 1 )} ms)` );
+			if ( ok( m ) ) {
 
-					good = n;
-					if ( n >= maxN ) break;
-					n = Math.round( n * 1.6 );
+				good = n;
+				if ( n >= maxN ) break;
+				n = Math.round( n * 1.6 );
 
-				} else {
+			} else {
 
-					bad = n;
-					break;
-
-				}
+				bad = n;
+				break;
 
 			}
-
-			// refine between good and bad
-			for ( let k = 0; k < 4 && bad && bad - good > Math.max( 1000, good * 0.06 ); k ++ ) {
-
-				const mid = Math.round( ( good + bad ) / 2 );
-				app.set( 'count', mid );
-				out( `<br>refining ${formatCount( mid )}…` );
-				const m = await this._measure();
-				log.push( `${formatCount( mid )} agents: ${m.fps.toFixed( 1 )} fps${m.gpu ? ` (GPU ${m.gpu.toFixed( 1 )} ms)` : ''}` );
-				if ( ok( m ) ) good = mid; else bad = mid;
-
-			}
-
-			const tris = good * app.crowd.models[ app.S.tier ].triangles;
-			this.results.crowd = { targetFps, maxAgents: good, trianglesPerFrame: tris, model: app.crowd.models[ app.S.tier ].id, path: app.S.path, judgedBy: byWork ? 'gpu+cpu time' : 'frame time', hitCapacity: good >= maxN, log: log.slice() };
-			this.onResult?.( 'maxCrowd', this.results.crowd );
-			app.set( 'count', good || original );
-			out( `<br><b>Result: ${formatCount( good )} agents</b> (~${formatCount( tris )} crowd triangles) hold ${targetFps} fps${good >= maxN ? ' - that is the largest crowd buffer this GPU allows, so the real limit is higher (try a heavier model or a higher fps target)' : ''}.` );
-
-		} catch {
-
-			app.set( 'count', original );
-			out( '<br>stopped.' );
 
 		}
 
-		this.running = false;
+		// refine between good and bad
+		for ( let k = 0; k < 4 && bad && bad - good > Math.max( 1000, good * 0.06 ); k ++ ) {
+
+			const mid = Math.round( ( good + bad ) / 2 );
+			app.set( 'count', mid );
+			out( `<br>refining ${formatCount( mid )}…` );
+			const m = await this._measure();
+			log.push( `${formatCount( mid )} agents: ${m.fps.toFixed( 1 )} fps${m.gpu ? ` (GPU ${m.gpu.toFixed( 1 )} ms)` : ''}` );
+			if ( ok( m ) ) good = mid; else bad = mid;
+
+		}
+
+		const model = app.crowd.models[ app.S.tier ];
+		const tris = good * model.triangles;
+		out( `<br><b>Result: ${formatCount( good )} agents</b> (~${formatCount( tris )} crowd triangles) hold ${targetFps} fps${good >= maxN ? ' - that is the largest crowd buffer this GPU allows, so the real limit is higher (try a heavier model or a higher fps target)' : ''}.` );
+		return { targetFps, maxAgents: good, trianglesPerFrame: tris, model: model.id, path: app.S.path, judgedBy: byWork ? 'gpu+cpu time' : 'frame time', hitCapacity: good >= maxN, log };
 
 	}
 
@@ -264,11 +284,12 @@ export class Bench {
 		const render = ( extra = '' ) => {
 
 			const useGpu = rows.some( ( r ) => r.gpuDelta !== null );
-			const sorted = [ ...rows ].sort( ( a, b ) => ( b.gpuDelta ?? b.frameDelta ) - ( a.gpuDelta ?? a.frameDelta ) );
+			const key = ( r ) => Math.max( r.gpuDelta ?? r.frameDelta, r.cpuDelta );
+			const sorted = [ ...rows ].sort( ( a, b ) => key( b ) - key( a ) );
 			app.ui.setBenchOutput( `<b>Effect cost on top of current settings</b> (${formatCount( app.S.count )} agents)` +
 				( this.ballast.active ? ` <span class="dim">· GPU kept busy at ${this.warmLoad.toFixed( 1 )} ms for stable clocks</span>` : '' ) + '<br>' +
-				`<table><tr><th>Effect</th><th>${useGpu ? 'GPU +ms' : 'frame +ms'}</th><th>fps</th></tr>` +
-				sorted.map( ( r ) => `<tr><td>${r.label}</td><td>${fmtDelta( useGpu ? r.gpuDelta : r.frameDelta )}</td><td>${r.fps.toFixed( 0 )}</td></tr>` ).join( '' ) +
+				`<table><tr><th>Effect</th><th>${useGpu ? 'GPU +ms' : 'frame +ms'}</th><th>CPU +ms</th><th>fps</th></tr>` +
+				sorted.map( ( r ) => `<tr><td>${r.label}</td><td>${fmtDelta( useGpu ? r.gpuDelta : r.frameDelta )}</td><td>${fmtDelta( r.cpuDelta )}</td><td>${r.fps.toFixed( 0 )}</td></tr>` ).join( '' ) +
 				'</table>' + extra );
 
 		};
@@ -282,17 +303,27 @@ export class Bench {
 
 				// skip tests that are already on
 				if ( Object.entries( test.set ).every( ( [ k, v ] ) => original[ k ] === v ) ) continue;
-				app.applyAll( { ...original, ...( test.base || {} ) } );
+				// Baseline, effect, baseline again: comparing the effect with the average
+				// of the two baselines cancels slow drift (clocks, temperature, other
+				// tabs) that a single before/after pair would count as cost.
+				const without = { ...original, ...( test.base || {} ) };
+				app.applyAll( without );
 				render( `<br>measuring baseline for ${test.label}…` );
-				const base = await this._measure( 900, 1100 );
-				app.applyAll( { ...original, ...( test.base || {} ), ...test.set } );
+				const a = await this._measure( 600, 800 );
+				app.applyAll( { ...without, ...test.set } );
 				render( `<br>measuring ${test.label}…` );
-				const m = await this._measure( 1200, 1300 );
+				const m = await this._measure( 900, 900 );
+				app.applyAll( without );
+				render( `<br>measuring baseline again…` );
+				const b = await this._measure( 600, 800 );
+				const avg = ( k ) => ( a[ k ] + b[ k ] ) / 2;
 				rows.push( {
 					label: test.label,
 					fps: m.fps,
-					frameDelta: m.frame - base.frame,
-					gpuDelta: m.gpu && base.gpu ? m.gpu - base.gpu : null
+					frameDelta: m.frame - avg( 'frame' ),
+					gpuDelta: m.gpu && a.gpu && b.gpu ? m.gpu - avg( 'gpu' ) : null,
+					// physics and other JavaScript work shows up here, not in GPU time
+					cpuDelta: m.cpu - avg( 'cpu' )
 				} );
 				render();
 

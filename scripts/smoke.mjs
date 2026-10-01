@@ -31,10 +31,14 @@ const url = opt( '--url', pathToFileURL( resolve( 'dist/index.html' ) ).href ) +
 const FRAMES = 6;
 
 const scenarios = [ { name: 'baseline', set: {} } ];
+// the standard benchmark's fixed conditions, without its (slow) crowd search
+const STANDARD_VIEW = 'app.setFixedResolution( { width: 1920, height: 1080 } ); app.rig.setBenchView( () => app.crowd.radius )';
+const CHECK_STANDARD_VIEW = 'const c = app.renderer.domElement; return c.width === 1920 && c.height === 1080 ? null : "canvas is " + c.width + "x" + c.height';
 const options = ( key ) => findItem( key ).options.map( ( o ) => o[ 0 ] );
 if ( quick ) {
 
 	scenarios.push( { name: 'benchmark ballast', set: {}, js: 'app.bench.ballast.set( 4096 )', frames: 4 }, { name: 'ballast off', keep: true, js: 'app.bench.ballast.set( 0 )' } );
+	scenarios.push( { name: 'standard view 1920x1080', set: { path: 'gpu' }, js: STANDARD_VIEW, frames: 4, expect: CHECK_STANDARD_VIEW }, { name: 'standard view off', keep: true, js: 'app.rig.setBenchView( null ); app.setFixedResolution( null )' } );
 	scenarios.push( { name: 'preset ultra', preset: 'ultra' }, { name: 'anim skeletal gpu', set: { anim: 'skeletal', path: 'gpu' } }, { name: 'physics', set: { physics: true }, frames: 30 } );
 
 } else {
@@ -45,6 +49,8 @@ if ( quick ) {
 	for ( const tier of [ 0, 1, 2, 3 ] ) scenarios.push( { name: 'tier ' + tier, set: { tier, outlines: true } } );
 	scenarios.push(
 		{ name: 'benchmark ballast', set: {}, js: 'app.bench.ballast.set( 4096 )', frames: 4 },
+		{ name: 'standard view 1920x1080', set: { path: 'gpu' }, js: STANDARD_VIEW, frames: 4, expect: CHECK_STANDARD_VIEW },
+		{ name: 'standard view off', keep: true, js: 'app.rig.setBenchView( null ); app.setFixedResolution( null )' },
 		{ name: 'ballast off', keep: true, js: 'app.bench.ballast.set( 0 )' },
 		{ name: 'physics', set: { physics: true }, frames: 40 },
 		{ name: 'physics explode', keep: true, action: 'explode', frames: 20 },
@@ -80,16 +86,20 @@ function fakeClaude() {
 		},
 		acquire: async ( { holder } ) => ( { acquired: true, holder } )
 	} );
-	const collection = ( path, filters = [] ) => ( {
+	const collection = ( path, filters = [], order = null, max = 1000 ) => ( {
 		path,
 		doc: ( id ) => doc( path + '/' + id ),
-		where: ( f, op, v ) => collection( path, [ ...filters, [ f, v ] ] ),
+		where: ( f, op, v ) => collection( path, [ ...filters, [ f, v ] ], order, max ),
+		orderBy: ( f, dir = 'asc' ) => collection( path, filters, [ f, dir ], max ),
+		limit: ( n ) => collection( path, filters, order, n ),
 		onSnapshot: ( next ) => {
 
 			const depth = path.split( '/' ).length + 1;
 			const run = () => {
 
-				const docs = [ ...store.docs ].filter( ( [ p, d ] ) => p.startsWith( path + '/' ) && p.split( '/' ).length === depth && filters.every( ( [ f, v ] ) => d[ f ] === v ) ).map( ( [ p, d ] ) => snap( p, d ) );
+				let docs = [ ...store.docs ].filter( ( [ p, d ] ) => p.startsWith( path + '/' ) && p.split( '/' ).length === depth && filters.every( ( [ f, v ] ) => d[ f ] === v ) );
+				if ( order ) docs.sort( ( [ , a ], [ , b ] ) => ( a[ order[ 0 ] ] < b[ order[ 0 ] ] ? - 1 : 1 ) * ( order[ 1 ] === 'desc' ? - 1 : 1 ) );
+				docs = docs.slice( 0, max ).map( ( [ p, d ] ) => snap( p, d ) );
 				next( { docs, size: docs.length, empty: ! docs.length } );
 
 			};
@@ -160,7 +170,8 @@ for ( const [ i, sc ] of scenarios.entries() ) {
 
 	}
 
-	const info = await page.evaluate( () => ( { fatal: window.__fatal || null, warn: document.getElementById( 'warnings' )?.innerText || '' } ) );
+	const info = await page.evaluate( ( expect ) => ( { fatal: window.__fatal || null, warn: document.getElementById( 'warnings' )?.innerText || '', expect: expect ? new Function( 'app', expect )( window.app ) : null } ), sc.expect || null );
+	if ( info.expect ) logs.push( 'check failed: ' + info.expect );
 	if ( /error/i.test( info.warn ) ) logs.push( 'UI warning: ' + info.warn.slice( 0, 300 ) );
 	if ( info.fatal ) logs.push( 'FATAL ' + info.fatal );
 	if ( shots ) await page.screenshot( { path: `${shots}/${String( i ).padStart( 2, '0' )}_${sc.name.replace( /\W+/g, '_' )}.png` } );
@@ -184,6 +195,11 @@ for ( const [ i, sc ] of scenarios.entries() ) {
 		db.command( 'c2', { cmd: 'sequence', args: { steps: [ { cmd: 'set', args: { values: { tier: 2, bloom: true } } }, { cmd: 'measure', args: { seconds: 1 } }, { cmd: 'screenshot' } ] } } );
 		db.command( 'c3', { cmd: 'set', args: { values: { notASetting: 1 } } } );
 		db.command( 'c4', { cmd: 'ping', device: 'some-other-device' } );
+		db.command( 'c5', { cmd: 'ping', target: 'mobile' } );
+		// a saved run from "another device", with markup in a field: the results
+		// panel must show it as text
+		db.docs.set( 'runs/r1', { kind: 'standard', device: 'other', gpu: '<img src=x id=xss>Test GPU', deviceKind: 'desktop', at: new Date().toISOString(),
+			data: { version: 1, score: 1234, direct: { agents: 1234000 }, gpuDriven: { agents: 4194304, hitCapacity: true }, looks: { fps: 60, gpuMs: 3.2 } } } );
 
 	} );
 	const res = await page.waitForFunction( () => {
@@ -204,6 +220,11 @@ for ( const [ i, sc ] of scenarios.entries() ) {
 		if ( c4.res || c4.cmd.status !== 'pending' ) logs.push( 'command for another device was run' );
 		const runs = await page.evaluate( () => [ ...window.__fakeDb.docs.keys() ].filter( ( k ) => k.startsWith( 'devices/' ) ).length );
 		if ( runs !== 1 ) logs.push( 'device document missing' );
+		const c5 = await page.evaluate( () => window.__fakeDb.docs.get( 'commands/c5' ).status );
+		if ( c5 !== 'pending' ) logs.push( 'mobile-only command was run on a desktop' );
+		const panel = await page.evaluate( () => ( { text: window.app.ui.resultsOut.textContent, xss: !! document.getElementById( 'xss' ) } ) );
+		if ( ! panel.text.includes( 'Test GPU' ) || ! panel.text.includes( '1234' ) ) logs.push( 'results panel did not show the saved run: ' + panel.text.slice( 0, 120 ) );
+		if ( panel.xss ) logs.push( 'results panel rendered markup from the database' );
 
 	}
 

@@ -199,13 +199,18 @@ export class UI {
 		const target = h( 'select', {}, h( 'option', { value: '60', text: '60 fps' } ), h( 'option', { value: '30', text: '30 fps' } ), h( 'option', { value: '120', text: '120 fps' } ) );
 		this.benchTarget = target;
 		this.benchOut = h( 'div', { class: 'bench-out' } );
+		// filled by the Claude link when the page runs as a claude.ai artifact
+		this.resultsOut = h( 'div', { class: 'bench-out' } );
+		this.resultsOut.style.display = 'none';
 		const btn = ( text, action ) => h( 'button', { class: 'chip', text, onclick: () => this.onAction( action ) } );
 		const body = h( 'div', { class: 'section-body' },
-			h( 'p', { class: 'hint', text: 'Run these on each device you care about, then copy the report. "Max crowd" ramps the agent count with the current settings until the frame rate drops below the target. "Effect costs" toggles each feature on top of your current settings and measures the extra milliseconds.' } ),
+			h( 'p', { class: 'hint', text: 'Run these on each device you care about, then copy the report. "Standard benchmark" uses fixed conditions (1920×1080, whole crowd in view, default settings) so results compare across devices; it takes 1-3 minutes. "Max crowd" ramps the agent count with your current settings until the frame no longer fits the target. "Effect costs" toggles each feature on top of your current settings and measures the extra milliseconds.' } ),
+			h( 'div', { class: 'presets' }, btn( '▶ Standard benchmark', 'benchStandard' ) ),
 			h( 'div', { class: 'row' }, h( 'label', { text: 'Target' } ), target ),
 			h( 'div', { class: 'presets' }, btn( '▶ Find max crowd', 'benchCrowd' ), btn( '▶ Measure effect costs', 'benchFx' ), btn( '■ Stop', 'benchStop' ) ),
 			h( 'div', { class: 'presets' }, btn( '📋 Copy report', 'report' ), btn( '🔗 Copy settings link', 'share' ), btn( '💥 Physics explosion', 'explode' ) ),
-			this.benchOut );
+			this.benchOut,
+			this.resultsOut );
 		this.body.append( this._sectionShell( 'Benchmark & report', body, true ) );
 
 	}
@@ -220,6 +225,14 @@ export class UI {
 
 		this.warnEl.textContent = list.join( ' · ' );
 		this.warnEl.style.display = list.length ? 'block' : 'none';
+
+	}
+
+	// html built by results.js (database values already escaped); null hides it
+	setResults( html ) {
+
+		this.resultsOut.style.display = html ? '' : 'none';
+		this.resultsOut.innerHTML = html ? '<hr><b>Results from all devices</b><br>' + html : '';
 
 	}
 
