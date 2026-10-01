@@ -83,8 +83,18 @@ await step( `level ${depth} with bot`, async () => {
 	const r = await page.evaluate( async ( secs ) => {
 
 		const g = window.game;
-		const bot = g.api?.bot ? g.api.bot( { seconds: secs } ) : null;
-		if ( bot ) return await bot;
+		// the real playtest bot (tools feature), stepped live by the link's frame hook
+		if ( g.link && g.api ) {
+
+			const bot = g.api( 'bot.create', {} );
+			g.link.bot = bot;
+			await new Promise( ( res ) => setTimeout( res, secs * 1000 ) );
+			g.link.bot = null;
+			g.input.held.clear();
+			g.input.move.x = g.input.move.z = 0;
+			return bot.report();
+
+		}
 		const t0 = performance.now();
 		while ( performance.now() - t0 < secs * 1000 ) {
 
