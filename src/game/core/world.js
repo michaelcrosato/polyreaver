@@ -367,6 +367,15 @@ function updateMovement( world, dt ) {
 		}
 
 		if ( e.action ) continue; // the action timeline owns state / phase / t
+		if ( e.data.spawnUntil > world.time ) {
+
+			// rising in: set data.spawnUntil (and spawnTime) when creating the entity
+			a.state = 'spawn';
+			a.t = 1 - ( e.data.spawnUntil - world.time ) / Math.max( 0.01, e.data.spawnUntil - ( e.data.spawnTime ?? world.time - 0.6 ) );
+			continue;
+
+		}
+
 		if ( e.forced && e.data.dodging ) a.state = 'dodge';
 		else if ( e.flags.stunned || e.flags.frozen ) a.state = 'stun';
 		else if ( world.time - a.hitTime < 0.18 && e.kind !== 'player' ) a.state = 'hit';

@@ -171,6 +171,8 @@ const COMMANDS = [
 		run: ( game, args ) => {
 
 			const w = needWorld( game );
+			// the monster feature's factory (families, archetypes, rarities) when present
+			if ( get( 'apiCommand', 'monsters.spawn' ) ) return game.api( 'monsters.spawn', args );
 			const spawner = get( 'spawner', 'monster' );
 			const out = [];
 			for ( let i = 0; i < ( args.count ?? 1 ); i ++ ) {

@@ -27,5 +27,6 @@ import './bosses.js';
 import './boss-defs.js';
 import './compose.js';
 import './director.js';
+import './rise.js';
 
 export * from './api.js';

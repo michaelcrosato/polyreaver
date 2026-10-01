@@ -336,11 +336,14 @@ export class RigRenderer {
 		const m = e.model;
 		// elite / rarity hooks: model.tint mixes the colours, model.glow adds a pulsing aura
 		let tintK = 0, glowK = 0;
-		if ( m.tint ) {
+		// ghosts (the Echoes mechanic's replay of the hero): the shared opaque
+		// materials cannot fade per instance, so a ghost reads as a strong cyan tint
+		const tint = m.tint ?? ( m.ghost ? '#6fe8ff' : null );
+		if ( tint ) {
 
-			hexToRgb( m.tint, _tint );
+			hexToRgb( tint, _tint );
 			for ( let k = 0; k < 3; k ++ ) _tint[ k ] = toLin( _tint[ k ] );
-			tintK = m.tintAmount ?? 0.35;
+			tintK = m.tintAmount ?? ( m.ghost ? 0.75 : 0.35 );
 
 		}
 
