@@ -4,7 +4,7 @@
 import { define } from '../../core/registry.js';
 import { h } from '../../ui/shell.js';
 
-define( 'uiPanel', { id: 'horde', order: 86, modal: true, pauseButton: 'Horde mode',
+define( 'uiPanel', { id: 'horde', order: 86, modal: true, startOpen: false, pauseButton: 'Horde mode',
 	mount( ui ) {
 
 		const waves = h( 'input', { type: 'number', min: 1, max: 50, value: 10, style: { width: '70px' } } );

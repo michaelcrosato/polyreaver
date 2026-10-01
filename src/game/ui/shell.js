@@ -8,6 +8,8 @@
 //     update( ui, game, dt )        every frame while visible (keep it cheap)
 //     onOpen( ui ), onClose( ui )
 //     pauseButton: 'Workshop'       optional: a button in the pause menu opens it
+//     startOpen                     default: open when it has no toggle (HUD-like panels);
+//                                   set false for screens opened by buttons or events
 //   } )
 //
 // Built in here: the HUD (life, mana, XP, area name, toasts) and the pause / debug

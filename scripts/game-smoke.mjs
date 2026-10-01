@@ -72,6 +72,9 @@ await step( 'boot + town', async () => {
 
 	await page.goto( url );
 	await page.waitForFunction( () => window.__fatal || window.game?.frameCount >= 5, null, { timeout: 180000 } );
+	// nothing modal may be open when the game starts (a panel without a toggle starts open)
+	const modal = await page.evaluate( () => [ ...window.ui.panels ].filter( ( [ , p ] ) => p.open && p.def.modal ).map( ( [ id ] ) => id ) );
+	if ( modal.length ) throw new Error( 'modal panel open at boot: ' + modal.join( ', ' ) );
 	return JSON.stringify( await page.evaluate( () => window.game.describe().world.entities ) );
 
 } );
