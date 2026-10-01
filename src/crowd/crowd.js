@@ -20,6 +20,7 @@
 //   sim.js        compute kernels: init, simulation, skeletal FK, proxy gather
 //   cull.js       GPU-driven path: cull + LOD passes, indirect draw args, readback
 //   materials.js  vertex shader, materials and the meshes that draw them
+//   motion.js     per-agent motion vectors for motion blur / TRAA
 
 import * as THREE from 'three/webgpu';
 import { uniform, uniformArray, instancedArray, varyingProperty } from 'three/tsl';
@@ -56,6 +57,7 @@ export class Crowd {
 		this.castShadow = false;
 		this.receiveShadow = false;
 		this.lodEnabled = true;
+		this.motionVectors = 'root'; // 'camera' | 'root' | 'full' - velocity buffer source (motion.js)
 		this.materialFactory = null; // optional ( kind ) => material, supplied by the app (cel shading)
 
 		// physics coupling (set by the app / physics module)
@@ -216,7 +218,7 @@ export class Crowd {
 	set( options ) {
 
 		let rebuild = false, recompute = false;
-		for ( const key of [ 'tier', 'path', 'materialKind', 'outlines', 'rim', 'blobShadows' ] ) {
+		for ( const key of [ 'tier', 'path', 'materialKind', 'outlines', 'rim', 'blobShadows', 'motionVectors' ] ) {
 
 			if ( key in options && options[ key ] !== this[ key ] ) {
 

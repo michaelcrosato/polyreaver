@@ -44,6 +44,7 @@ export const FX_TESTS = [
 	{ label: 'Tilt-shift DOF', set: { dof: 'tiltshift' } },
 	{ label: 'Bokeh DOF', set: { dof: 'bokeh' } },
 	{ label: 'Motion blur', set: { motionBlur: true } },
+	{ label: 'Motion vectors: full pose (blur on)', set: { motionBlur: true, motionVectors: 'full' }, base: { motionBlur: true } },
 	{ label: 'SSR', set: { ssr: true, shading: 'standard' }, base: { shading: 'standard' } },
 	{ label: 'SSGI', set: { ssgi: true } },
 	{ label: 'Ink edges (Sobel)', set: { stylize: 'ink' } },

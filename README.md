@@ -262,7 +262,8 @@ shaders, so expect a one-off hitch).
 | Ambient occlusion | Off | ●●●○ heavy | fill / bandwidth | Darkens creases and contact points by sampling the depth + normal buffers around each pixel (16 samples, half resolution). Requires writing a normal buffer (MRT) in the main pass. GTAO is more accurate and looks best with TRAA. **Mobile:** Expensive on phones; run at half resolution (already done here) or skip. |
 | Bloom | off | ●●○○ moderate | bandwidth | Bright pixels bleed light: a threshold pass then 5 progressively downsampled blur levels. Mostly bandwidth. |
 | Depth of field | Off | ●●●○ heavy | fill / bandwidth | Tilt-shift blurs the top and bottom of the screen: the classic "miniature" isometric look for the price of one blur. Bokeh DOF computes a circle of confusion from depth and gathers a disc of samples - much heavier. |
-| Motion blur | off | ●●○○ moderate | bandwidth | Smears pixels along their screen-space velocity (requires a velocity buffer). Camera motion only for the crowd, because agents are positioned by the GPU. |
+| Motion blur | off | ●●○○ moderate | bandwidth | Smears pixels along their screen-space velocity (requires a velocity buffer). What the crowd writes into that buffer is set by "Crowd motion vectors". |
+| Crowd motion vectors | Root motion (walk velocity) | ●●○○ moderate | vertex / compile | Motion blur, TRAA and SSGI read a velocity buffer: how far each pixel moved on screen since the last frame. three.js works it out per vertex from last frame's camera and the vertex's previous position, but the crowd is placed by our vertex shader from GPU data, so it has to supply that position itself. Camera only: previous = current, so walking people get no motion blur and TRAA smears them. Root motion: the shader rebuilds each agent's walking velocity from data it already has (state, heading, agent index - the simulation's own speed formula) and steps one frame back: a hash and a sin/cos per vertex, no extra buffers. Full: also re-runs the animation one frame earlier (previous phase and cross-fade), so swinging arms and legs blur too - roughly doubles the per-vertex animation cost. Skeletal uses root motion here: its bone buffer only holds the current frame's pose. Nothing is computed unless a velocity buffer is rendered; changing it recompiles the crowd shaders. **Mobile:** Root motion is close to free; Full doubles the animation work of a vertex-bound crowd, so keep it for desktop. |
 | Screen-space reflections | off | ●●●● very heavy | fill / bandwidth | Makes the plaza wet and ray-marches the depth buffer to find reflected pixels. Needs normal + metal/roughness buffers. Only reflects what is on screen. Works best with Standard/Physical shading. **Mobile:** Usually too heavy for phones. |
 | Screen-space GI | off | ●●●● very heavy | fill / bandwidth | Screen-space global illumination: bounced light + AO from the depth/normal buffers, temporally accumulated. The heaviest effect here - a "what does ultra cost" knob. |
 | Colour grading | off | ●○○○ cheap | fill | Saturation, contrast and warmth adjustments. A few ALU ops per pixel. |
@@ -326,6 +327,10 @@ animation) and *Physics playground* (Rapier bodies raining on a colliding crowd)
   everyone.
 * **GPU vs Rapier crowd collisions**: GPU handles every agent for a few milliseconds of compute;
   Rapier handles a few thousand with exact two-way contacts but costs CPU time and a round trip.
+* **Crowd motion vectors** with Motion blur or TRAA on: *camera only* leaves walking people sharp
+  under motion blur and lets TRAA smear them; *root* fixes both for a few ALU ops per vertex; *full*
+  also blurs swinging limbs for about twice the vertex animation cost. Best seen up close (chase or
+  eye-level camera) with a high walk speed.
 * **Pixel filters** often make the frame *cheaper*, because the scene really renders at 144-240 lines.
 
 ## Development
@@ -353,6 +358,7 @@ src/crowd/crowd.js      Crowd class: lifecycle, settings, per-frame compute orde
 src/crowd/sim.js        compute kernels: init, simulation/AI, skeletal bones, physics proxies
 src/crowd/cull.js       GPU-driven path: frustum + screen-size LOD cull, indirect draws
 src/crowd/materials.js  crowd vertex shader per animation system, materials, meshes
+src/crowd/motion.js     per-agent motion vectors (velocity buffer) for motion blur / TRAA
 src/crowd/anim.js       the six animation systems (procedural, keyframe, skeletal, baked bones, VAT)
 src/crowd/clips.js      hand-keyed animation clips + CPU pose chain (bone texture + VAT baking)
 src/crowd/models.js     procedural low-poly character tiers (+ skin weights)
@@ -374,8 +380,12 @@ scripts/                post-build copy, README table generator, smoke test
 
 ## Notes and limits
 
-* The velocity buffer (for motion blur / TRAA) captures camera motion but not each agent's own
-  motion, because agents are positioned entirely by the GPU.
+* Agents are positioned entirely by the vertex shader, so three.js can't derive their motion vectors
+  (the velocity buffer for motion blur / TRAA / SSGI) itself. *Crowd motion vectors*
+  (`src/crowd/motion.js`) rebuilds them in the shader: *root* steps each agent back by one frame of
+  its walking velocity (same speed formula as the simulation, no extra buffers), *full* also
+  re-evaluates last frame's animation pose (skeletal falls back to root: its bone buffer only holds
+  the current pose). GPU-collision pushes, knockbacks and turning are not captured.
 * GPU crowd collisions are position-based and use fixed-size grid buckets (8 per 1 m cell); in an
   extremely dense pile a few overlaps are missed each frame. Rapier-mode agents stay upright
   (rotations locked) and are kept on the ground plane.
@@ -385,6 +395,8 @@ scripts/                post-build copy, README table generator, smoke test
   shadows into it.
 * r186 details handled here: `PCFSoftShadowMap` was folded into `PCFShadowMap` (+ radius), and
   `PassNode.getViewZNode()` assumes a perspective camera, so depth of field computes an
-  orthographic view-Z itself for the isometric camera.
+  orthographic view-Z itself for the isometric camera. The velocity buffer holds NDC offsets (y up)
+  while `motionBlur()` steps in UV space (y down), so motion blur converts it the way TRAA does
+  (otherwise diagonal motion smears along the mirrored diagonal, at twice the length).
 * Built and smoke-tested in headless Chromium with a software WebGPU adapter (SwiftShader). That
   checks correctness, not speed, so all real performance numbers have to come from real devices.

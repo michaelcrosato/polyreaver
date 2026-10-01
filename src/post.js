@@ -244,7 +244,10 @@ export class PostFX {
 
 			if ( S.motionBlur ) {
 
-				const vel = scenePass.getTextureNode( 'velocity' ).mul( this.u.motion );
+				// The velocity buffer holds NDC offsets (y up, 2 units across the screen) and the
+				// blur steps in UV space (y down, 1 unit across): convert like TRAA does, or
+				// diagonal motion smears along the mirrored diagonal at twice the length.
+				const vel = scenePass.getTextureNode( 'velocity' ).xy.mul( vec2( 0.5, - 0.5 ) ).mul( this.u.motion );
 				color = motionBlur( keep( convertToTexture( color ) ), vel );
 
 			}

@@ -45,6 +45,7 @@ if ( quick ) {
 
 	for ( const id of Object.keys( PRESETS ) ) scenarios.push( { name: 'preset ' + id, preset: id } );
 	for ( const path of options( 'path' ) ) for ( const anim of options( 'anim' ) ) scenarios.push( { name: `anim ${anim} ${path}`, set: { anim, path } } );
+	for ( const anim of options( 'anim' ) ) scenarios.push( { name: 'motion vectors full ' + anim, set: { anim, path: 'gpu', motionVectors: 'full', motionBlur: true, aa: 'traa', outlines: true, blobShadows: true } } );
 	for ( const stylize of options( 'stylize' ) ) scenarios.push( { name: 'stylize ' + stylize, set: { stylize } } );
 	for ( const tier of [ 0, 1, 2, 3 ] ) scenarios.push( { name: 'tier ' + tier, set: { tier, outlines: true } } );
 	scenarios.push(
