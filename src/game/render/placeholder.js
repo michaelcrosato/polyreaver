@@ -95,6 +95,7 @@ define( 'renderSystem', { id: 'placeholder-entities', order: 20,
 		nose.frustumCulled = false;
 		nose.count = 0;
 		rc.scene.add( nose );
+		mesh.setColorAt( 0, tmpC.set( 0xffffff ) ); // create instanceColor before the material compiles
 		this.mesh = mesh; this.nose = nose;
 		this.l = { x: 0, y: 0, z: 0, facing: 0 };
 
@@ -134,6 +135,7 @@ define( 'renderSystem', { id: 'placeholder-fx', order: 30,
 		const ring = new THREE.InstancedMesh( new THREE.RingGeometry( 0.9, 1, 32 ).rotateX( - Math.PI / 2 ), new THREE.MeshBasicNodeMaterial( { transparent: true, opacity: 0.5, depthWrite: false } ), 512 );
 		for ( const m of [ ball, ring ] ) {
 
+			m.setColorAt( 0, tmpC.set( 0xffffff ) ); // instanceColor must exist before the first render
 			m.frustumCulled = false;
 			m.count = 0;
 			rc.scene.add( m );

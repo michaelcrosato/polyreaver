@@ -102,6 +102,12 @@ export function resolveHit( world, src, tgt, hit ) {
 
 	}
 
+	// --- difficulty sliders (before mitigation, so armour treats a slider-scaled hit
+	// exactly like a naturally bigger one) -------------------------------------------
+	const tune = world.tuning;
+	const teamMult = src && src.team === TEAM.ENEMY ? tune.enemyDamage : src && src.team === TEAM.PLAYER ? tune.playerDamage : 1;
+	if ( teamMult !== 1 ) for ( const k in byType ) byType[ k ] *= teamMult;
+
 	// --- mitigation ----------------------------------------------------------
 	let total = 0;
 	for ( const type in byType ) {
@@ -126,10 +132,7 @@ export function resolveHit( world, src, tgt, hit ) {
 
 	}
 
-	// --- difficulty sliders ----------------------------------------------------
-	const tune = world.tuning;
-	if ( src && src.team === TEAM.ENEMY ) total *= tune.enemyDamage;
-	if ( src && src.team === TEAM.PLAYER ) total *= tune.playerDamage;
+	// --- debug toggles ---------------------------------------------------------
 	if ( tgt.team === TEAM.PLAYER && tune.godMode ) total = 0;
 	if ( tgt.team === TEAM.ENEMY && src?.team === TEAM.PLAYER && tune.oneShot ) total = tgt.life + tgt.shield + 1;
 	const scale = raw > 0 ? total / Math.max( 1e-9, Object.values( byType ).reduce( ( a, b ) => a + b, 0 ) ) : 0;
