@@ -49,10 +49,17 @@ toward the horizon).
 
 1. Start from **Bare** (the default). Everything is off: unlit flat colours, no post-processing.
 2. Open *Benchmark & report* → **Find max crowd** at 30 or 60 fps. It ramps the agent count until
-   the frame rate falls below the target, then narrows it down.
+   the frame no longer fits the target, then narrows it down. With GPU timestamps (most desktop
+   browsers) it judges GPU and CPU time against the frame budget rather than the frame rate,
+   because vsync caps the frame rate: on an RTX 3060 Ti every size up to a million agents "ran at
+   60 fps" while the GPU was only 35 % busy. It grows the crowd buffer as needed, up to 4M agents.
 3. Turn on the features you want in your game (or pick a preset) and run it again. Or run
    **Measure effect costs**: it switches each feature on top of your current settings and records
-   the extra milliseconds.
+   the extra milliseconds. A mostly idle GPU drops to power-saving clocks and its timings become
+   noise (identical runs measured 0.5 and 4.4 ms), so when the scene is light the benchmark first
+   adds a fixed dummy compute load (the "ballast", `src/ballast.js`) to keep the clocks up. It
+   costs the same with and without each effect, so it cancels out. Differences under ~0.5 ms are
+   still within the noise.
 4. **Copy report** and paste it somewhere. It includes the GPU/adapter, browser, resolution, all
    non-default settings and both benchmark results. Do the same on each device you care about.
 
