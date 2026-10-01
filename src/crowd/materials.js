@@ -14,18 +14,21 @@ import {
 } from './anim.js';
 import { TAU, hashF } from './sim.js';
 import { ensureLodBuffers } from './cull.js';
+import { previousPosition, previousBlobPosition } from './motion.js';
 
 // three.js derives the "previous frame" vertex position (velocity buffer for motion
 // blur / TRAA) from the raw geometry, which ignores positionNode. Our agents are
-// placed entirely by positionNode, so make "previous" equal the current animated
-// position: camera motion is still captured, agent motion is not.
-export function withPreviousPosition( material ) {
+// placed entirely by positionNode, so supply it ourselves: `previous()` builds it
+// (agent motion, see motion.js); without one, "previous" equals the current animated
+// position, so only camera motion is captured. Only passes that render a velocity
+// buffer call it - every other pass compiles without any of that work.
+export function withPreviousPosition( material, previous = null ) {
 
 	const setupPosition = material.setupPosition.bind( material );
 	material.setupPosition = ( builder ) => {
 
 		const result = setupPosition( builder );
-		if ( builder.needsPreviousData() ) positionPrevious.assign( positionLocal );
+		if ( builder.needsPreviousData() ) positionPrevious.assign( previous ? previous() : positionLocal );
 		return result;
 
 	};
@@ -37,11 +40,13 @@ export function withPreviousPosition( material ) {
 // -----------------------------------------------------------------------
 // Vertex shader: decode instance, animate, place in world.
 // -----------------------------------------------------------------------
-export function vertexNode( crowd, inst, anim, tier, { hull = false } = {} ) {
+// `previous`: re-run for last frame's pose (motion vectors), skipping the colours.
+export function vertexNode( crowd, inst, anim, tier, { hull = false, previous = false } = {} ) {
 
 	const u = crowd.u;
 	const vColor = crowd.vColor;
 	const system = crowd.animSystem;
+	const time = previous ? u.time.sub( u.dt ) : u.time;
 
 	return Fn( () => {
 
@@ -61,7 +66,7 @@ export function vertexNode( crowd, inst, anim, tier, { hull = false } = {} ) {
 
 		if ( system === 'procedural' ) {
 
-			v = proceduralVertex( v, jointA, jointB, crowd.procTable, state, p, u.time, seed );
+			v = proceduralVertex( v, jointA, jointB, crowd.procTable, state, p, time, seed );
 
 		} else if ( system === 'keyframe' ) {
 
@@ -86,7 +91,7 @@ export function vertexNode( crowd, inst, anim, tier, { hull = false } = {} ) {
 		const scale = select( seed.equal( 0 ), float( 1.12 ), hashF( seed, 11 ).mul( 0.22 ).add( 0.88 ) );
 		const world = rotY( v.mul( scale ), heading ).add( vec3( inst.x, 0, inst.z ) );
 
-		if ( ! hull ) {
+		if ( ! hull && ! previous ) {
 
 			// Colours authored in sRGB and converted to linear (≈ gamma 2.2).
 			const slot = attribute( 'slot', 'float' );
@@ -127,7 +132,8 @@ export function makeMaterial( crowd, inst, anim, tier, { hull = false } = {} ) {
 		mat.positionNode = vertexNode( crowd, inst, anim, tier, { hull: true } );
 		mat.fog = true;
 		mat.name = 'CrowdOutline';
-		return withPreviousPosition( mat );
+		const pose = ( i, a ) => vertexNode( crowd, i, a, tier, { hull: true, previous: true } );
+		return withPreviousPosition( mat, previousPosition( crowd, inst, anim, pose ) );
 
 	}
 
@@ -171,7 +177,8 @@ export function makeMaterial( crowd, inst, anim, tier, { hull = false } = {} ) {
 	}
 
 	mat.name = 'Crowd_' + kind + '_' + crowd.animSystem;
-	return withPreviousPosition( mat );
+	const pose = ( i, a ) => vertexNode( crowd, i, a, tier, { previous: true } );
+	return withPreviousPosition( mat, previousPosition( crowd, inst, anim, pose ) );
 
 }
 
@@ -190,7 +197,7 @@ export function makeBlobMaterial( crowd ) {
 	mat.colorNode = vec3( 0, 0, 0 );
 	mat.opacityNode = float( 1 ).sub( smoothstep( 0.35, 1.0, d ) ).mul( 0.55 );
 	mat.name = 'BlobShadow';
-	return withPreviousPosition( mat );
+	return withPreviousPosition( mat, previousBlobPosition( crowd, inst ) );
 
 }
 

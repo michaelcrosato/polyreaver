@@ -28,7 +28,7 @@ export function applyCrowd( app ) {
 	const shadowsOn = S.shadows !== 'off';
 	crowd.set( {
 		tier: Number( S.tier ), path: S.path, animSystem: S.anim, animBlend: S.animBlend, outlines: S.outlines, rim: S.rim,
-		blobShadows: S.blobShadows, lodEnabled: S.lod, materialKind: S.shading,
+		blobShadows: S.blobShadows, lodEnabled: S.lod, materialKind: S.shading, motionVectors: S.motionVectors,
 		castShadow: shadowsOn && S.crowdShadows, receiveShadow: shadowsOn
 	} );
 	u.outline.value = S.outlineWidth;

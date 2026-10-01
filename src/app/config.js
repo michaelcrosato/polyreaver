@@ -12,7 +12,7 @@ export const TONE = {
 export const IS_MOBILE = matchMedia( '(pointer: coarse)' ).matches || /Android|iPhone|iPad/i.test( navigator.userAgent );
 export const DPR = window.devicePixelRatio || 1;
 
-export const CROWD_KEYS = new Set( [ 'count', 'capacity', 'tier', 'path', 'lod', 'anim', 'animBlend', 'behaviour', 'density', 'activity', 'speed', 'outlines', 'outlineWidth', 'rim', 'blobShadows', 'crowdShadows' ] );
+export const CROWD_KEYS = new Set( [ 'count', 'capacity', 'tier', 'path', 'lod', 'anim', 'animBlend', 'behaviour', 'density', 'activity', 'speed', 'outlines', 'outlineWidth', 'rim', 'blobShadows', 'crowdShadows', 'motionVectors' ] );
 export const SHADING_KEYS = new Set( [ 'shading', 'hemi', 'env', 'shadows', 'pointLights', 'clustered' ] );
 export const WORLD_KEYS = new Set( [ 'sky', 'fog', 'props', 'groundDetail' ] );
 export const RES_KEYS = new Set( [ 'maxDpr', 'renderScale', 'upscaler' ] );
