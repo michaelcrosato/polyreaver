@@ -7,7 +7,13 @@ a town hub, and endless procedural depth built from Spore-style modular monsters
 inspected, generated and tested headless.
 
 Build: `npm run build:game` → `polyreaver.html` (one self-contained file). Dev: `npm run dev` →
-`http://localhost:5173/game.html`. Headless: `node scripts/sim.mjs`, `node scripts/game-smoke.mjs`.
+`http://localhost:5173/game.html`. Headless: `npm run sim`, `npm run smoke:game`.
+**AI agents start with [`AGENTS.md`](AGENTS.md)**: recipes, the Workshop, the bot, balance, the Claude link.
+
+Content today (`kindsList()`): 36 monster families, 14 archetypes, 42 monster abilities, 28 elite affixes,
+12 bosses with 29 patterns, 8 body plans, 83 body parts, 152 models, 34 skills, 28 supports, 35 statuses,
+165 item bases, 136 affixes, 35 uniques, 12 currencies, 1,483 passive nodes (58 clusters, 26 keystones,
+3 ascendancies), 13 themes, 12 mechanics, 20 designed levels + endless, 58 agent commands.
 
 ---
 
@@ -42,7 +48,7 @@ and list them in your report):
 | monsters | `features/monsters` | monster families, behaviour archetypes (AI), monster abilities, elite affixes, bosses, encounter director, procedural monsters & bosses |
 | progression | `features/progression` | XP rewards, items/affixes/rarities/uniques/currency, loot drops & pickup, inventory/equipment/stash/vendor/crafting, passive tree (+UI), skills & supports UI/loadout, flasks, save fields |
 | world | `features/world` | level layout generators, themes (palette, props, lighting, fog), level mechanics, campaign + endless level provider, town hub + NPC placement/services, level renderer, minimap, waypoint |
-| tools | `features/tools` | agent API, bot, inspectors, Workshop labs, contact sheets, Claude link game commands |
+| tools | `features/tools` | agent API, playtest bot, inspector, Workshop (lab worlds, loot roller, balance table), Claude link game commands |
 
 ## 2. The registry (design language)
 
@@ -55,7 +61,7 @@ override baseline). Kinds:
 |---|---|---|
 | `system` | any | `{ id, order, init?(world), update(world, dt) }` — sim systems, see order table below |
 | `renderSystem` | any client | `{ id, order, init?(rc), onWorld?(rc, world, game), update?(rc, world, alpha, dt), resize?(rc) }` |
-| `uiPanel` | any client | `{ id, order, toggle?, modal?, startOpen?, mount(ui) → el, update?(ui, game, dt), onOpen?, onClose? }` |
+| `uiPanel` | any client | `{ id, order, toggle?, modal?, startOpen?, pauseButton?, mount(ui) → el, update?(ui, game, dt), onOpen?, onClose? }` (`pauseButton: 'Label'` adds a pause-menu button) |
 | `bootHook` | any client | `{ id, order, boot({ game, rc, ui, renderer, gpu, opts }) }` — after boot, before the first world |
 | `worldHook` | any sim | `{ id, order, onWorld(game, world) }` — populate a new world (spawns, mechanics, NPCs, listeners) |
 | `saveField` | any sim | `{ id, init() }` — persistent character data (plain JSON) |
@@ -75,11 +81,12 @@ override baseline). Kinds:
 | `affix` | progression | `{ id, affixType: 'prefix'\|'suffix', tags (base tags it can roll on), text, stats: [{ stat, type, tags? }], tiers: [{ level, ranges }], weight }` (not `kind`: define() overwrites `def.kind`) |
 | `unique` | progression | named item with fixed mods + a unique mechanic hook |
 | `currency` | progression | crafting orbs |
-| `treeNode` | progression | generated passive nodes (data), or `treeCluster` templates |
+| `treeCluster` / `keystone` / `ascendancy` | progression | passive tree building blocks (the 1,483-node tree is generated from them; see `tree.js`) |
 | `theme` | world | `{ id, name, palette, floor, wall, props, lighting, fog, sky, post, music? }` |
-| `mechanic` | world | `{ id, name, desc, tags, combinesWith?, setup(game, world, ctx), update?(world, dt, ctx), render? }` |
+| `mechanic` | world | `{ id, name, desc, tip, tags, theme, depth, words, combinesWith, conflicts, decorate(L, rng, ctx), setup(game, world, ctx), preMove / postMove / postEffects / update(world, dt, ctx), field(world, ctx, x, z, out), describe(world, ctx) }` (`mechanics/index.js`) |
 | `level` | world | designed campaign level (§8) |
-| `levelGenerator` | world | `{ id, generate(game, spec, rng) → Layout }` |
+| `levelGenerator` | world | `{ id, generate(game, spec, rng) → Layout }` (dungeon, caves, arena, town) |
+| `roomTemplate` | world | room shapes the dungeon generator stamps (`gen/rooms.js`) |
 | `levelProvider` | world | `{ id, order, spec(game, depth) → spec \| null }` (campaign first, endless after) |
 | `palette` | creatures/world | named colour sets (`primary, secondary, accent, skin, metal, glow, dark`) |
 | `bodyPlan` / `bodyPart` | creatures | genome building blocks (§5) |
@@ -121,6 +128,7 @@ projectile_count projectile_speed pierce chain duration cooldown_recovery mana_c
 block_chance res_<type> max_res_<type> pen_<type> pen_armor damage_taken life_leech mana_leech life_on_hit
 <ailment>_chance knockback stun_threshold pickup_radius item_rarity item_quantity gold_find xp_gain
 dodge_cooldown dodge_distance strength dexterity intelligence minion_damage minion_life`.
+`damage_taken` has a base of 1 on players and monsters (so "increased damage taken" mods work).
 `<type>` ∈ `physical fire cold lightning chaos`. Mod: `{ stat, type: flat|inc|more|override, value, tags?, when? }`.
 
 ### Events (`world.events`, payload fields)
@@ -133,7 +141,14 @@ Game-level (`game.events`): `world`, `levelup`, `gold`, `levelComplete`, `player
 
 ### Input state (`game.input`, also written by bots and the agent API)
 `move {x,z}` (length ≤ 1, world-space; screen-up = −z), `aim {x,z}` (world point), `held` / `pressed` Sets of
-action names: `attack skill1…skill6 dodge interact potion`. `pressed` lasts one sim step.
+action names: `attack skill1…skill5` (the six bar slots), `dodge interact potion flask2 flask3 flask4`. `pressed` lasts
+one sim step. Default keys: LMB, RMB, 1–4, Space, F/E, Q (best flask), R/Z/X (flask slots 2–4); gamepad and touch twin-stick
+in `features/combat/client/input.js`.
+
+### World state (`world.state`)
+Plain per-world data, **namespaced by feature**: `flow` (world: level flow, exit, timer), `mech` (world: mechanic
+contexts by id), `objectives`, `director` / `bossActive` / `navField` (monsters), `labels` / `labCamera` (tools labs),
+`complete`. Pick a key that names your feature: two features writing `state.flow` once broke the level timer.
 
 ## 4. Animation vocabulary (actions the rig layer must pose)
 
@@ -157,6 +172,9 @@ States `dodge` (roll), `hit` (flinch along `hitDir`), `stun` (wobble), `dead` (`
   `model = { type: 'creature', genome }`; bosses use `size` ≥ 2.
 * **Hero**: `model = { type: 'hero', id: 'reaver', weapon: { base, rarity, color }, gear: {…tints} }` — keep the engine's
   triangle-person hero look (see `src/crowd/models.js`, yellow marker ring) as a segmented rig.
+* **Model fields the rig renderer reads**: `type id genome seed scale palette tint glow rarity color state emote hidden`
+  (`hidden`: burrowed / lab — the instance is kept, nothing is drawn; `state`: pose of state props such as chest lids and
+  braziers; `seed`: per-entity variation of a model def). One shared material; 13 instanced draws for the whole cast.
 
 ### Cross-feature hand-offs (who emits / who consumes)
 
@@ -169,7 +187,8 @@ States `dodge` (roll), `hit` (flinch along `hitDir`), `stun` (wobble), `dead` (`
 * **Interact**: the world feature's sim emits `interact {entity, target}` when the player presses interact near an NPC /
   prop; NPCs carry `data.service` (`vendor craft stash tree skills waypoint gamble dummy`); the client opens the panel with
   that id (progression owns `vendor craft stash tree skills inventory character`, world owns `waypoint`).
-* **Potion**: the player controller emits `potion {entity}` on the potion input; progression's flasks consume it.
+* **Potion**: the player controller emits `potion {entity}` on the potion input (best flask); `flask2..4` inputs emit
+  `potion {entity, slot}`; progression's flasks consume both.
 * **Rig attachments**: the rig renderer publishes `rc.attach` = Map(entity id → `{ weaponBase, weaponTip, handL, handR,
   head, chest }` THREE.Vector3s) every frame; VFX use it for weapon trails and cast origins (fallback: from facing).
 * **Hit flash**: renderers flash entities from `e.anim.hitTime` (sim time of the last hit) — no extra wiring.
@@ -178,9 +197,11 @@ States `dodge` (roll), `hit` (flinch along `hitDir`), `stun` (wobble), `dead` (`
 ## 6. Skills (combat feature)
 
 `define( 'skill', { id, name, tags: [ 'attack'|'spell', 'melee'|'projectile'|'area'|'movement'|'buff'|'minion', element… ],
-icon, manaCost, cooldown, levelReq, weapon?: [classes], desc, action( level, stats ) → action def, supports?: [tags] } )`.
-Supports: `define( 'support', { id, name, tags (skill tags it applies to), manaMult, mods: [stat mods applied to the skill],
-transform?( skillCtx ) } )`. Loadout lives in `game.save.skills = { known: [ids], bar: [6 ids|null] (LMB, RMB, 1–4),
+icon, manaCost, cooldown, levelReq, time, reach, desc, hits: { name: () => hit numbers }, action( level, ctx ) → action def } )`
+— `ctx` is the SKILL CONTEXT (`ctx.stats` the caster's StatBlock, `ctx.hit()`, `ctx.radius`, `ctx.element`…), see the header of
+`features/combat/skill-core.js`. Supports: `define( 'support', { id, name, tags (skill tags it fits), excludes, manaMult,
+mods( level ) | [mods] (scoped to the skill by a private `sk:<id>` tag), transform?( ctx ) } )`. Tooltips:
+`skillTooltip( game, id )` / api `combat.tooltip`. Loadout lives in `game.save.skills = { known: [ids], bar: [6 ids|null] (LMB, RMB, 1–4),
 supports: { skillId: [supportIds] }, levels: { skillId: n } }` (progression owns the save field and UI; combat reads it).
 
 ## 7. Loot & progression (progression feature)
@@ -214,6 +235,14 @@ exploit it (chain reactions, crowd control, speed tech).
 | 21+ | **endless** | procedural | combine 1–3 mechanics × theme × palette × monster families × boss composition; names generated from the mechanics |
 
 Level spec: `{ id, depth, name, level (area level), theme, mechanics: [ids], generator, families: [ids], boss, seed, rules? }`.
+Generation always leaves every room reachable on foot from the start (bridges over gaps; floor pockets a pool cut off are
+sealed), so neither a leap nor a spawn can strand anything.
+
+**Balance baseline** (`npm run sim`, the bot with `player.kit` at character level 2×depth−1): every campaign depth 1–20
+clears in about 1–3.5 minutes; endless clears to about depth 60 (area level ~100) and walls around depth 75. Starter
+gear alone (`--naked`) clears the early depths and dies from depth ~10, so gear and passives matter. Monster scaling
+(`core/tuning.js` `monsterScaling`) keeps kill times within ~1.5–4.7× and hits-to-die within ~0.4–1.15× of level 1 up to
+level 100 for a geared character; damage ramps to ×1.3 over the first ten levels.
 Each level ends with a boss (designed for 1–12, combinations reuse/remix, procedural after); killing it opens the exit portal
 (`exitOpen`); `game.completeLevel()`; portal returns to town or continues deeper.
 
@@ -227,16 +256,22 @@ head look-at, idle variety); ambient townsfolk can use the GPU crowd.
 ## 10. Agent tools (tools feature)
 
 `game.api( id, args )` runs a registered `apiCommand` and returns plain JSON — the same commands are exposed to Node
-(`scripts/sim.mjs`), to the browser console and to the Claude link. Minimum set: `describe`, `entities`, `inspect {id}`,
-`spawn {family|genome, x, z, level}`, `genome.generate/mutate/cross`, `level.ascii`, `loot.roll {n, level}`,
-`tree.summary`, `tuning.set`, `bot.run {seconds}`, `screenshot`, `contactSheet {kind, n}`.
+(`scripts/sim.mjs`), to the browser console (`window.api`, the ` inspector) and to the Claude link. `help` lists all 58.
+Groups: world & entities (`describe entities inspect stat events step teleport kill.all spawn`), levels (`town level.enter
+level.spec level.ascii level.describe level.campaign mechanic.list mechanic.describe theme.list world.state`), monsters
+(`monsters.*`), loot & character (`loot.roll loot.sim items.* tree.* stats.player flask.drink player.set player.kit`), combat
+(`combat.tooltip combat.cast combat.camera`), tuning (`tuning.get/set/reset`), bot (`bot.create bot.run`), Workshop labs
+(`lab.genomes lab.monsters lab.bosses lab.actions lab.models lab.clear`), browser-only `perf`. The Creature Lab is
+`game.creatureLab.*` / `#lab=creature`; the Workshop panel `#lab=workshop`. Claude link commands: `ping api play perf
+screenshot sequence` (`features/tools/link.js`). Recipes and workflow: [`AGENTS.md`](AGENTS.md).
 
 ## 11. Budgets and conventions
 
 * 60 fps on a mid phone at ~150 active monsters; desktop: 500+. Instanced rendering for anything numerous.
 * WebGPU only. ≤ 8 storage buffers per shader stage (phones). No texture assets: everything is procedural.
 * three.js "mdcs" style (tabs, `foo( a, b )`, blank lines inside function bodies). Comments are teaching notes.
-* Tests: `npm run lint`, `npm run build:game`, `node scripts/game-smoke.mjs`, `node scripts/sim.mjs`.
+* Tests: `npm run lint`, `npm run build:game`, `npm run smoke:game` (town, a level with the bot, every UI panel, Workshop
+  galleries), `npm run sim`. CI: lint + both builds + a short sim on every push; the smoke tests nightly.
 
 ## 12. Monsters feature — contracts it adds (`features/monsters`, map in its `sim.js`)
 

@@ -34,6 +34,14 @@ rendering/physics, the full one before merging a large change. CI runs the full 
 - Split modules export functions that take the owning object; classes keep one-line delegates.
 - No model names in commits. "Commit, push and merge" = push the work branch, then fast-forward `main`.
 
+## Polyreaver (the showcase game, `src/game/`)
+- Read `docs/GAME.md` (contracts) and `docs/AGENTS.md` (workflow, recipes) before changing it. Each
+  `features/<name>/sim.js` / `client.js` header maps its folder and API.
+- `sim.js` side = no three.js / DOM / window (runs in Node). `world.state.<key>` is namespaced per feature.
+- `npm run build:game` writes `polyreaver.html` (commit it). `npm run sim -- --depth 1-20` is the balance
+  check (bot + `player.kit`); `npm run smoke:game` after a build when UI/rendering could break.
+- Inspect visually with the Workshop (`lab.*` api commands, `#lab=workshop`) and screenshots.
+
 ## Claude link (benchmarks on the user's real GPU)
 Artifact: https://claude.ai/artifact/LePB3jW73zXCViKwbA3RUx (published from `webgpu-crowd-stress.html`
 with capabilities `db`, `user`, `assets`). When the user has it open, queue work with the `ArtifactData`

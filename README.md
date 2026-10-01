@@ -10,6 +10,26 @@ and which effects cut off which hardware.
 * **`webgpu-crowd-stress.html`** – the whole app in **one self-contained file** (three.js, Rapier WASM,
   code, CSS all inlined, ~3.2 MB). Put it anywhere and open it.
 * **`src/`** – the readable source (plain ES modules, no framework).
+* **`polyreaver.html`** – **Polyreaver**, the engine's showcase game (see below), also one self-contained file.
+
+## Polyreaver: the showcase game
+
+A fast isometric hack-and-slash built on this engine, in the spirit of Path of Exile 2 and Diablo IV:
+- **Combat.** A buffered, cancelable combat controller; 34 skills and 28 supports; ailments; GPU particles and
+  dynamic lights.
+- **Progression.** A 1,483-node passive tree with keystones and ascendancies; XP, gold and loot with affixes,
+  uniques and crafting currency; a town hub with animated NPCs.
+- **Levels.** Twelve levels each named after their own mechanic (Powder Keg, Spike Field, Lightless, Black Ice,
+  Conduits, Rift Gates, Magma Tide, Gravity Wells, Echoes, The Swarm, Chrono Fields, Miasma). Depths 13-20 combine
+  them. From depth 21 on, levels are generated endlessly from mechanics, themes, palettes, Spore-style monster
+  genomes and composed bosses.
+
+| | |
+|---|---|
+| Play | open `polyreaver.html` (WebGPU browser), or `npm run dev` → `/game.html`. `#depth=5` starts in a level, `#fresh` ignores the save |
+| Controls | WASD move · LMB attack (hold to combo) · RMB / 1-4 skills · Space dodge roll · Q potion, R/Z/X flasks · F interact · I bag · T tree · K skills · C character · Tab map · V camera (iso / over-the-shoulder / top-down) · Esc menu (difficulty sliders, Workshop) · gamepad and touch twin-stick supported |
+| For AI agents | [`docs/AGENTS.md`](docs/AGENTS.md): JSON command API (`game.api`), the Workshop asset galleries, a playtest bot, a headless balance sim, the Claude link. The contract: [`docs/GAME.md`](docs/GAME.md) |
+| Headless | `npm run sim -- --depth 1-20` plays the real game in Node with the bot and prints a balance table |
 
 ## Running it
 
@@ -345,11 +365,14 @@ animation) and *Physics playground* (Rapier bodies raining on a colliding crowd)
 | `npm run dev` | dev server with hot reload |
 | `npm run lint` | ESLint (catches undefined names, unused code) |
 | `npm run build` | single-file build → `dist/index.html` + `webgpu-crowd-stress.html` |
+| `npm run build:game` | Polyreaver single-file build → `dist-game/` + `polyreaver.html` |
+| `npm run sim` | Polyreaver headless: the bot plays depths in Node (`--depth 1-20`, `--seconds`, `--seed`, `--naked`, `--json`) |
+| `npm run smoke:game` | after `build:game`: town, a level with the bot, every UI panel and the Workshop in headless Chromium |
 | `npm run smoke` | after a build: headless Chromium with a software GPU walks every preset, animation system, stylize mode and physics action, and checks the Claude link against a fake database. Fails on any page or WebGPU error. `--quick` for a 1-2 minute version, `--shots dir/` saves screenshots. |
 
-GitHub runs two automatic jobs (*Actions* tab): **Build** (lint + build on every push, the built
-HTML is downloadable from the run) and **Smoke test** (the full smoke test, nightly if something
-was pushed that day, or on demand with *Run workflow*). The smoke test proves things run, not how
+GitHub runs two automatic jobs (*Actions* tab): **Build** (lint, both builds and a short headless
+game simulation on every push; the built HTML files are downloadable from the run) and **Smoke test**
+(both smoke tests, nightly if something was pushed that day, or on demand with *Run workflow*). The smoke test proves things run, not how
 fast: the software GPU is a CPU rasteriser.
 
 ## Project layout
@@ -382,7 +405,10 @@ src/ballast.js          fixed dummy GPU load that keeps clocks up while measurin
 src/results.js          "Results from all devices" panel (artifact database runs)
 src/bridge.js           Claude link (artifact database command runner)
 src/ui.js, input.js     settings panel, HUD graph, keyboard / touch controls
-scripts/                post-build copy, README table generator, smoke test
+scripts/                post-build copies, README table generator, smoke tests, headless game sim
+game.html, src/game/    Polyreaver: core/ (sim kernel, runs in Node), game.js, main.js, ui/, render/,
+                        features/{creatures,combat,monsters,progression,world,tools} - see docs/GAME.md
+docs/                   GAME.md (engine contracts) and AGENTS.md (how an AI agent works on the game)
 .github/workflows/      Build (every push) and Smoke test (nightly / on demand)
 ```
 
