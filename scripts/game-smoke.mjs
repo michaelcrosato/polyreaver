@@ -7,7 +7,7 @@
 //   npm run build:game && node scripts/game-smoke.mjs [--shots dir/] [--depth 3] [--url ...]
 
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -24,7 +24,7 @@ const depth = + opt( '--depth', 1 );
 const seconds = + opt( '--seconds', 25 );
 const url = opt( '--url', pathToFileURL( resolve( 'dist-game/game.html' ) ).href ) + '#fresh&seed=smoke';
 const FLAGS = [ '--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPUService', '--use-vulkan=swiftshader', '--use-webgpu-adapter=swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist' ];
-const NOISE = /Download the|DevTools|experimental on this platform|deprecated parameters for the initialization function/;
+const NOISE = /Download the|DevTools|experimental on this platform|deprecated parameters for the initialization function|permissions policy violation/;
 
 const browser = await chromium.launch( { args: FLAGS } );
 const page = await browser.newPage( { viewport: { width: 960, height: 600 } } );
@@ -183,6 +183,39 @@ await step( 'workshop galleries', async () => {
 	await page.evaluate( () => window.api( 'lab.clear' ) );
 	await frames( 3 );
 	return n.join( ' + ' ) + ' lab entities';
+
+} );
+
+// The claude.ai artifact viewer runs the game inside an iframe whose permissions policy
+// blocks device APIs (gamepad, fullscreen, camera...). It must still run there: a blocked
+// gamepad poll once froze every frame.
+await step( 'restricted iframe', async () => {
+
+	if ( ! url.startsWith( 'file:' ) ) return 'skipped (not a local build)';
+	const wrap = resolve( 'dist-game/iframe-test.html' );
+	writeFileSync( wrap, '<!doctype html><body style="margin:0"><iframe src="game.html#fresh&seed=iframe" allow="gamepad \'none\'; fullscreen \'none\'; camera \'none\'; microphone \'none\'" style="width:900px;height:560px;border:0"></iframe>' );
+	try {
+
+		await page.goto( pathToFileURL( wrap ).href );
+		let frame = null;
+		for ( let i = 0; i < 60 && ! frame; i ++ ) {
+
+			frame = page.frames().find( ( f ) => f.url().includes( 'game.html' ) );
+			if ( ! frame ) await page.waitForTimeout( 500 );
+
+		}
+
+		if ( ! frame ) throw new Error( 'iframe did not load' );
+		await frame.waitForFunction( () => window.__fatal || window.game?.frameCount >= 6, null, { timeout: 180000 } );
+		const r = await frame.evaluate( () => ( { frames: window.game.frameCount, world: window.game.world?.frame, errors: ( window.game.errors || [] ).map( ( e ) => e.msg ) } ) );
+		if ( ! r.world ) throw new Error( 'the simulation did not advance inside the iframe' );
+		return `${r.frames} frames, sim frame ${r.world}${r.errors.length ? ' - caught: ' + r.errors.join( '; ' ) : ''}`;
+
+	} finally {
+
+		unlinkSync( wrap );
+
+	}
 
 } );
 

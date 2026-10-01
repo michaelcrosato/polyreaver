@@ -224,6 +224,10 @@ runs the same simulation in the browser.
   - Integer codes passed as instance attributes arrive interpolated, so round them before
     comparing.
   - A value used inside several `If` blocks must be `.toVar()`'d first.
+- **Embedded pages.** The claude.ai artifact viewer runs the game in an iframe that blocks
+  device APIs (gamepad, fullscreen, camera...). Wrap every such call in `try`. The frame loop
+  guards its input, frame and UI stages separately and keeps what it caught in `game.errors`
+  (api `errors`, also over the Claude link). The smoke test's "restricted iframe" step checks this.
 - **SwiftShader limits.** Headless Chromium's software GPU is slow: about 1-2 s per frame in a
   level. It also stops producing frames after about 70 frames when the bloom pass is on.
   Real GPUs are fine. The smoke test turns post-processing off (`game.gfx.set( { post: 'off' } )`)

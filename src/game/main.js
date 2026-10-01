@@ -146,23 +146,24 @@ async function boot() {
 	window.ui = ui;
 	let last = performance.now();
 	game.frameCount = 0;
-	renderer.setAnimationLoop( () => {
+	// recent errors (api 'errors' / the Claude link reads them); the first one is shown once
+	game.errors = [];
+	const guard = ( stage, fn ) => {
 
-		const now = performance.now();
-		const dt = Math.min( 0.1, ( now - last ) / 1000 );
-		last = now;
 		try {
 
-			poll?.( dt );
-			const alpha = game.update( rc.hitstop > 0 ? 0 : dt );
-			rc.hitstop = Math.max( 0, rc.hitstop - dt );
-			rc.frame( alpha, dt );
-			ui.update( dt );
-			game.frameCount ++;
+			fn();
 
 		} catch ( e ) {
 
-			console.error( e );
+			const msg = `${stage}: ${e?.message || e}`;
+			if ( game.errors.length < 50 && ! game.errors.some( ( x ) => x.msg === msg ) ) {
+
+				console.error( e );
+				game.errors.push( { msg, at: game.frameCount, stack: String( e?.stack || '' ).split( '\n' ).slice( 0, 4 ).join( ' | ' ) } );
+
+			}
+
 			if ( ! game._errShown ) {
 
 				game._errShown = true;
@@ -171,6 +172,25 @@ async function boot() {
 			}
 
 		}
+
+	};
+	renderer.setAnimationLoop( () => {
+
+		const now = performance.now();
+		const dt = Math.min( 0.1, ( now - last ) / 1000 );
+		last = now;
+		// three stages, each guarded on its own: a failing input device must never stop
+		// the simulation or the picture (an embedding page may block the gamepad API...)
+		guard( 'input', () => poll?.( dt ) );
+		guard( 'frame', () => {
+
+			const alpha = game.update( rc.hitstop > 0 ? 0 : dt );
+			rc.hitstop = Math.max( 0, rc.hitstop - dt );
+			rc.frame( alpha, dt );
+
+		} );
+		guard( 'ui', () => ui.update( dt ) );
+		game.frameCount ++;
 
 	} );
 

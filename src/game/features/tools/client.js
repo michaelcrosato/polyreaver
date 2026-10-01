@@ -15,6 +15,8 @@ define( 'apiCommand', { id: 'perf', desc: 'Renderer statistics for the last fram
 
 } } );
 
+define( 'apiCommand', { id: 'errors', desc: 'Errors caught by the frame loop (stage, message, first stack lines) - browser only.', run: ( game ) => ( { frame: game.frameCount, errors: game.errors || [] } ) } );
+
 define( 'bootHook', { id: 'tools-window', order: 1, boot( { game } ) {
 
 	// console convenience: api( 'level.ascii' ) etc.

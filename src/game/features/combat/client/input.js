@@ -496,7 +496,19 @@ class InputLayer {
 	pollGamepad( dt ) {
 
 		this.padMove = null;
-		const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+		if ( this.noPads ) return;
+		let pads;
+		try {
+
+			pads = navigator.getGamepads ? navigator.getGamepads() : [];
+
+		} catch {
+
+			this.noPads = true; // blocked by the embedding page's permissions policy (artifact iframes)
+			return;
+
+		}
+
 		let gp = null;
 		for ( const g of pads ) if ( g && g.connected && g.mapping === 'standard' ) {
 
