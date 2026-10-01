@@ -3,4 +3,5 @@
 // the browser and the Claude link do.
 
 import './api.js';
+import './lab.js';
 export { createBot, astar } from './bot.js';
