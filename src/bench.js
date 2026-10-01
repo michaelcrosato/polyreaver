@@ -52,6 +52,7 @@ export const FX_TESTS = [
 	{ label: 'Anim: keyframe + blend', set: { anim: 'keyframe' }, base: { anim: 'procedural' } },
 	{ label: 'Anim: skeletal skinning', set: { anim: 'skeletal' }, base: { anim: 'procedural' } },
 	{ label: 'Anim: baked VAT', set: { anim: 'vat' }, base: { anim: 'procedural' } },
+	{ label: 'Anim: baked bone texture', set: { anim: 'bat' }, base: { anim: 'procedural' } },
 	{ label: 'Cel shading (Wind Waker)', set: { shading: 'celWW' } },
 	{ label: 'Cel + outlines (Jet Set Radio)', set: { shading: 'celJSR', outlines: true, outlineWidth: 0.09 } },
 	{ label: 'Pixel: PICO-8 palette', set: { stylize: 'pico8' } },

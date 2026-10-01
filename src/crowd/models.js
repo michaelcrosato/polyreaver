@@ -7,18 +7,19 @@
 //   jointB    - xyz: parent pivot (shoulder / hip) for two-segment limbs, w: unused
 //   slot      - colour slot (skin / shirt / pants / shoes / hair)
 //   hullDir   - direction used to "inflate" the mesh for inverted-hull outlines
-//   skinIdx   - two bone ids (bone id == part id) for the skeletal-skinning system
+//   skinIdx   - two bone ids (bone id == part id) for the two skinned systems
 //   skinW     - weight of the first bone (1 = rigid). Joint rings of the two-segment
-//               limbs are shared 50/50 so skeletal mode bends smoothly at elbows/knees.
+//               limbs are shared 50/50 so skinned modes bend smoothly at elbows/knees.
 //
 // No normals are stored: the renderer falls back to flat shading computed from
 // screen-space derivatives, which is exactly the faceted Star Fox look we want
 // and saves 12 bytes per vertex.
 //
-// Animation runs on the GPU (the five systems are in anim.js, wired into the
+// Animation runs on the GPU (the six systems are in anim.js, wired into the
 // vertex shader in materials.js). The rigid-part systems rotate each part around
 // its pivot, so they need no skeleton, no skinning matrices and no per-bone
-// uniforms - just math on the part id. Only the skeletal system uses skinIdx/skinW.
+// uniforms - just math on the part id. Only the skinned systems (skeletal and baked
+// bones) use skinIdx/skinW.
 
 import * as THREE from 'three/webgpu';
 

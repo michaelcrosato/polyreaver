@@ -1,4 +1,4 @@
-// Hand-keyed animation clips shared by the keyframe, skeletal and VAT systems.
+// Hand-keyed animation clips shared by the keyframe, skeletal, baked-bone and VAT systems.
 //
 // A pose is 16 joint channels (radians, except rootY in metres):
 //   0 rootY      body bob / jump height
@@ -208,7 +208,7 @@ export function clipTable() {
 // clip during a cross-fade. Walk/run normally derive it from the agent's speed.
 export const CLIP_RATE = [ 1.1, 6.5, 11.0, 4.5, 5.0, 4.2, 2.4, 9.0 ];
 
-// --- CPU reference implementation (used to bake VAT textures) ---------------
+// --- CPU reference implementation (used to bake the VAT and bone textures) --
 export function samplePose( state, phase, out = new Float32Array( CHANNELS ) ) {
 
 	const f = ( ( ( phase / ( Math.PI * 2 ) ) % 1 ) + 1 ) % 1 * KEYS_BAKED;
