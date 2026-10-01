@@ -1,7 +1,6 @@
-// Agent tools - simulation side (window.game API commands, headless bot, inspectors, Workshop labs, contact sheets, Claude link game commands.)
-//
-// Rules for files imported from here: no three.js, no DOM, no window. This entry is
-// loaded by the browser AND by Node (scripts/sim.mjs), so everything it registers
-// (defs, systems, hooks) must run headless. Rendering / UI code goes in client.js.
+// Agent tools - simulation side: the JSON command API (game.api) and the playtest
+// bot. Node-safe (no three.js / DOM): scripts/sim.mjs and tests use the same API
+// the browser and the Claude link do.
 
-export {};
+import './api.js';
+export { createBot, astar } from './bot.js';
