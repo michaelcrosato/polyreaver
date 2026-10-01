@@ -225,7 +225,7 @@ define( 'uiPanel', { id: 'map', order: 17, toggle: 'map', startOpen: false,
 } );
 
 document.head.append( h( 'style', { text: `
-.w-minimap { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px; border-radius: 50%; background: rgba(6,8,12,0.7); border: 2px solid rgba(255,255,255,0.18); box-shadow: 0 2px 12px rgba(0,0,0,0.5); }
+.w-minimap { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 40px); right: 12px; border-radius: 50%; background: rgba(6,8,12,0.7); border: 2px solid rgba(255,255,255,0.18); box-shadow: 0 2px 12px rgba(0,0,0,0.5); }
 .w-mapwrap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(4,6,10,0.55); }
 .w-bigmap { border-radius: 12px; background: rgba(6,8,12,0.6); border: 1px solid var(--line); }
 .w-maptitle { font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; text-shadow: 0 1px 3px #000; }

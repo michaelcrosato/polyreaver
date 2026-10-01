@@ -187,12 +187,16 @@ export function installFlasks( game, world ) {
 
 }
 
-// Fallback for builds without the combat controller: read the potion button directly
-// (the frame stamp prevents a double drink when the controller also emits 'potion').
+// Flask buttons: 'flask2'..'flask4' drink that belt slot. 'potion' (the best flask) is
+// normally emitted by the combat controller; this is the fallback for builds without
+// it (the frame stamp prevents a double drink when the controller also emits 'potion').
 export function pollPotionInput( world ) {
 
 	const rt = runtime( world ), game = rt?.game;
-	if ( ! game || ! world.input?.pressed.has( 'potion' ) || rt.potionFrame === world.frame ) return;
+	if ( ! game || ! world.input ) return;
+	// belt slots 2-4 have their own buttons ('flask2'...'flask4'; R / Z / X by default)
+	for ( let i = 1; i < 4; i ++ ) if ( world.input.pressed.has( 'flask' + ( i + 1 ) ) ) world.events.emit( 'potion', { entity: world.player, slot: i } );
+	if ( ! world.input.pressed.has( 'potion' ) || rt.potionFrame === world.frame ) return;
 	rt.potionFrame = world.frame;
 	world.events.emit( 'potion', { entity: world.player, fallback: true } );
 

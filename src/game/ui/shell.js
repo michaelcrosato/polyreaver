@@ -271,8 +271,9 @@ define( 'uiPanel', { id: 'pause', order: 90, toggle: 'pause-menu', modal: true,
 const CSS = `
 .hud { position: absolute; inset: 0; }
 .hud .area { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); font-weight: 600; text-shadow: 0 1px 3px #000; letter-spacing: 0.04em; }
+@media (max-width: 600px) { .hud .area { left: max(10px, env(safe-area-inset-left)); transform: none; top: max(8px, env(safe-area-inset-top)); font-size: 12px; max-width: calc(100vw - 220px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
 .hud .bottom { position: absolute; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 10px); left: 50%; transform: translateX(-50%); display: flex; gap: clamp(6px, 2vw, 14px); align-items: center; max-width: calc(100vw - 16px); }
-.hud .info { font-weight: 600; text-shadow: 0 1px 3px #000; min-width: 0; text-align: center; font-size: clamp(11px, 3vw, 15px); }
+.hud .info { font-weight: 600; text-shadow: 0 1px 3px #000; min-width: 0; text-align: center; font-size: clamp(11px, 3vw, 15px); white-space: nowrap; }
 .bar { position: relative; width: min(33vw, 260px); height: 22px; background: rgba(0,0,0,0.6); border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
 .bar .fill { position: absolute; inset: 0; width: 100%; transition: width 0.08s linear; }
 .bar.life .fill { background: linear-gradient(#ef4a4a, #9c1e1e); }

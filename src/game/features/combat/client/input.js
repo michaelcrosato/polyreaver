@@ -8,7 +8,7 @@
 // "up" is always "away from the camera" (iso: -z; chase: wherever the camera looks).
 //
 //  keyboard/mouse  WASD/arrows move, cursor aims (ground point under it), LMB attack,
-//                  RMB skill 1, 1-4 skills 2-5, Space/Shift dodge, Q potion, F/E interact,
+//                  RMB skill 1, 1-4 skills 2-5, Space/Shift dodge, Q potion, R/Z/X flasks 2-4, F/E interact,
 //                  V camera mode, wheel zoom; chase camera: click locks the pointer and
 //                  the mouse turns the view (Esc releases it)
 //  gamepad         left stick move, right stick aim (auto-aim when idle; turns the camera
@@ -30,7 +30,8 @@ import { settings, isTouchDevice } from './settings.js';
 const KEYS = {
 	KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
 	Space: 'dodge', ShiftLeft: 'dodge', ShiftRight: 'dodge', KeyF: 'interact', KeyE: 'interact', KeyQ: 'potion',
-	Digit1: 'skill2', Digit2: 'skill3', Digit3: 'skill4', Digit4: 'skill5', Digit5: 'skill6',
+	Digit1: 'skill2', Digit2: 'skill3', Digit3: 'skill4', Digit4: 'skill5',
+	KeyR: 'flask2', KeyZ: 'flask3', KeyX: 'flask4', // flask belt slots 2-4 (Q drinks the best flask)
 	KeyV: 'camera', Escape: 'pause', KeyP: 'pause', KeyI: 'inventory', KeyT: 'tree', KeyK: 'skills', KeyC: 'character',
 	KeyM: 'map', Tab: 'map', Backquote: 'debug'
 };

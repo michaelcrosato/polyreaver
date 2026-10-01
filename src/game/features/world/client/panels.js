@@ -336,11 +336,12 @@ const CSS = `
 .w-mech span { display: block; font-size: 13px; margin: 2px 0; }
 .w-mech em { display: block; font-size: 12px; color: var(--good); font-style: normal; }
 .w-chips { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 24px); left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
+@media (max-width: 600px) { .w-chips { left: max(10px, env(safe-area-inset-left)); transform: none; top: calc(max(8px, env(safe-area-inset-top)) + 26px); } }
 .w-chip { pointer-events: auto; background: rgba(10,12,18,0.7); border: 1px solid var(--line); border-radius: 999px; padding: 1px 10px; font-size: 12px; color: var(--accent); cursor: help; }
-.w-objectives { position: absolute; top: 230px; right: 14px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.w-objectives { position: absolute; top: 272px; right: 14px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 .w-obj { background: rgba(10,12,18,0.7); border-left: 3px solid var(--accent); padding: 3px 10px; font-size: 12px; border-radius: 4px; }
 .w-obj.done { border-color: var(--good); color: var(--good); }
-.w-timer { position: absolute; top: 210px; right: 14px; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--dim); text-shadow: 0 1px 2px #000; }
+.w-timer { position: absolute; top: 252px; right: 14px; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--dim); text-shadow: 0 1px 2px #000; }
 .toast.objective { color: var(--accent); }
 .w-waypoint { width: min(760px, 96vw); }
 .w-levels { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; margin: 8px 0 12px; }

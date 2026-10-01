@@ -107,8 +107,15 @@ export const CSS = `
 .pg-stat .pg-uncap { color: #ffb35a; }
 
 /* HUD */
-.pg-hud-flasks { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 44px);
+/* the belt sits left of the skill bar (combat HUD, ~470px wide, centred); on narrow
+   screens and phones it sits under the life / mana bars (top-left in touch mode),
+   away from the touch controls */
+.pg-hud-flasks { position: absolute; left: calc(50% - 246px); transform: translateX(-100%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 48px);
 	display: flex; gap: 6px; align-items: flex-end; pointer-events: none; }
+@media (max-width: 820px), (pointer: coarse) {
+	.pg-hud-flasks { left: max(10px, env(safe-area-inset-left)); top: calc(max(8px, env(safe-area-inset-top)) + 122px); bottom: auto; transform: none; align-items: flex-start; }
+	.pg-hud-flasks .pg-buffs, .pg-hud-flasks .pg-points { order: 1; }
+}
 .pg-flask { pointer-events: auto; width: 30px; height: 44px; position: relative; background: rgba(0,0,0,0.6); border: 1px solid #4b5262; border-radius: 6px 6px 9px 9px; cursor: pointer; overflow: hidden; touch-action: manipulation; }
 .pg-flask > i { position: absolute; left: 0; right: 0; bottom: 0; }
 .pg-flask.pg-ready { border-color: #c8d2e8; }

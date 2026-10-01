@@ -22,6 +22,8 @@ import { get } from '../../../core/registry.js';
 
 const FLASK_COLORS = { life: '#d83030', mana: '#3060e0', hybrid: '#a040c0', utility: '#c8ccd4' };
 
+const FLASK_KEYS = [ 'Q', 'R', 'Z', 'X' ]; // keyboard defaults (combat input: potion, flask2..flask4)
+
 define( 'uiPanel', { id: 'prog-hud', order: 12,
 	mount( ui ) {
 
@@ -29,7 +31,7 @@ define( 'uiPanel', { id: 'prog-hud', order: 12,
 		PG.ui = ui; PG.game = ui.game;
 		this.flasks = [ 0, 1, 2, 3 ].map( ( i ) => {
 
-			const el = h( 'div', { class: 'pg-flask', title: `Flask ${i + 1}` }, h( 'i' ), h( 'span', { text: i === 0 ? 'Q' : String( i + 1 ) } ) );
+			const el = h( 'div', { class: 'pg-flask', title: `Flask ${i + 1}` }, h( 'i' ), h( 'span', { text: FLASK_KEYS[ i ] } ) );
 			el.addEventListener( 'click', () => {
 
 				const r = drinkFlask( ui.game, i );
@@ -43,7 +45,7 @@ define( 'uiPanel', { id: 'prog-hud', order: 12,
 		this.pointsEl = h( 'div', { class: 'pg-points hidden', onclick: () => ui.open( 'tree', true ) } );
 		const menuBtn = ( label, key, action ) => h( 'button', { title: `${label} (${key})`, onclick: () => ui.action( action ) }, label, h( 'span', { class: 'k', text: key } ) );
 		return h( 'div', { class: 'hud-prog' },
-			h( 'div', { class: 'pg-hud-flasks' }, ...this.flasks, this.pointsEl, this.buffs ),
+			h( 'div', { class: 'pg-hud-flasks' }, this.buffs, this.pointsEl, ...this.flasks ),
 			h( 'div', { class: 'pg-menu' }, menuBtn( 'Bag', 'I', 'inventory' ), menuBtn( 'Char', 'C', 'character' ), menuBtn( 'Skill', 'K', 'skills' ), menuBtn( 'Tree', 'T', 'tree' ), menuBtn( 'Menu', 'Esc', 'pause' ) ) );
 
 	},

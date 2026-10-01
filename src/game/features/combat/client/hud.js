@@ -374,5 +374,5 @@ const CSS = `
 body.pr-touch-mode .hud .bottom { left: max(10px, env(safe-area-inset-left)); transform: none; top: calc(max(8px, env(safe-area-inset-top)) + 54px); bottom: auto; flex-direction: column; align-items: flex-start; gap: 4px; }
 body.pr-touch-mode .hud .bar { width: min(42vw, 210px); height: 16px; }
 body.pr-touch-mode .hud .info { min-width: 0; text-align: left; font-size: 12px; }
-body.pr-touch-mode .pr-buffs { left: max(10px, env(safe-area-inset-left)); transform: none; top: calc(max(8px, env(safe-area-inset-top)) + 124px); bottom: auto; }
+body.pr-touch-mode .pr-buffs { left: max(10px, env(safe-area-inset-left)); transform: none; top: calc(max(8px, env(safe-area-inset-top)) + 174px); bottom: auto; }
 `;

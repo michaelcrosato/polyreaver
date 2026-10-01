@@ -27,10 +27,10 @@ export function flowField( world ) {
 
 	const p = world.player, L = world.layout;
 	if ( ! p ) return null;
-	let f = world.state.flow;
+	let f = world.state.navField;
 	if ( ! f || f.layout !== L ) {
 
-		f = world.state.flow = { layout: L, dist: new Uint16Array( L.w * L.h ), queue: new Int32Array( L.w * L.h ), tx: - 1, tz: - 1, at: - 1 };
+		f = world.state.navField = { layout: L, dist: new Uint16Array( L.w * L.h ), queue: new Int32Array( L.w * L.h ), tx: - 1, tz: - 1, at: - 1 };
 
 	}
 
