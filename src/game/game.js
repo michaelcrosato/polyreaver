@@ -29,13 +29,13 @@ export const PLAYER_BASE = {
 	armor: 0, evade_chance: 0, block_chance: 0,
 	max_res_fire: 75, max_res_cold: 75, max_res_lightning: 75, max_res_chaos: 75,
 	pickup_radius: 2.5, item_rarity: 0, item_quantity: 0, gold_find: 0, xp_gain: 0,
-	dodge_cooldown: 0.45, dodge_distance: 5.2, stun_threshold: 0.2
+	dodge_cooldown: 0.45, dodge_distance: 5.2, stun_threshold: 0.2, damage_taken: 1
 };
 
 export const MONSTER_BASE = {
 	life: 30, mana: 100, move_speed: 4, attack_speed: 1, cast_speed: 1, damage: 1, crit_chance: 5, crit_multi: 150,
 	area: 1, projectile_speed: 1, duration: 1, cooldown_recovery: 1, knockback: 1, max_res_fire: 75, max_res_cold: 75,
-	max_res_lightning: 75, max_res_chaos: 75, stun_threshold: 0.12
+	max_res_lightning: 75, max_res_chaos: 75, stun_threshold: 0.12, damage_taken: 1
 };
 
 export class Game {

@@ -81,6 +81,7 @@ export class GameWorld {
 		}
 
 		if ( e.life <= 1 && e.maxLife > 1 ) e.life = e.maxLife;
+		if ( e.shield <= 0 ) e.shield = e.stats.get( 'shield' );
 		this.events.emit( 'spawn', { entity: e, x: e.x, z: e.z } );
 		return e;
 
@@ -146,14 +147,16 @@ export class GameWorld {
 		e.life = 0;
 		cancelAction( this, e, 'death' );
 		e.forced = null;
-		e.statuses.clear();
 		e.anim.state = 'dead';
 		e.anim.t = 0;
 		e.anim.seq ++;
 		e.data.deathTime = this.time;
 		if ( e.team === TEAM.ENEMY ) this.stats.kills ++;
 		if ( e.kind === 'player' ) this.stats.deaths ++;
+		// statuses are cleared AFTER the event so death hooks can see them
+		// ("ignited enemies explode", "frozen enemies shatter")
 		this.events.emit( 'death', { entity: e, killer, hit, x: e.x, z: e.z } );
+		e.statuses.clear();
 
 	}
 

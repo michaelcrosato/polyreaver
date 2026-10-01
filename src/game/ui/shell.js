@@ -21,6 +21,7 @@ export function h( tag, attrs = {}, ...children ) {
 	const el = document.createElement( tag );
 	for ( const [ k, v ] of Object.entries( attrs ) ) {
 
+		if ( v === null || v === undefined || v === false ) continue; // absent attribute (disabled: null -> enabled)
 		if ( k === 'class' ) el.className = v;
 		else if ( k === 'style' && typeof v === 'object' ) Object.assign( el.style, v );
 		else if ( k === 'text' ) el.textContent = v;
@@ -262,9 +263,9 @@ define( 'uiPanel', { id: 'pause', order: 90, toggle: 'pause-menu', modal: true,
 const CSS = `
 .hud { position: absolute; inset: 0; }
 .hud .area { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); font-weight: 600; text-shadow: 0 1px 3px #000; letter-spacing: 0.04em; }
-.hud .bottom { position: absolute; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 10px); left: 50%; transform: translateX(-50%); display: flex; gap: 14px; align-items: center; }
-.hud .info { font-weight: 600; text-shadow: 0 1px 3px #000; min-width: 140px; text-align: center; }
-.bar { position: relative; width: min(30vw, 260px); height: 22px; background: rgba(0,0,0,0.6); border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
+.hud .bottom { position: absolute; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 10px); left: 50%; transform: translateX(-50%); display: flex; gap: clamp(6px, 2vw, 14px); align-items: center; max-width: calc(100vw - 16px); }
+.hud .info { font-weight: 600; text-shadow: 0 1px 3px #000; min-width: 0; text-align: center; font-size: clamp(11px, 3vw, 15px); }
+.bar { position: relative; width: min(33vw, 260px); height: 22px; background: rgba(0,0,0,0.6); border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
 .bar .fill { position: absolute; inset: 0; width: 100%; transition: width 0.08s linear; }
 .bar.life .fill { background: linear-gradient(#ef4a4a, #9c1e1e); }
 .bar.mana .fill { background: linear-gradient(#4a8cef, #1e4c9c); }
