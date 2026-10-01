@@ -10,7 +10,8 @@ import {
 } from 'three/tsl';
 import { buildBlobGeometry } from './models.js';
 import {
-	sampleBlended, channels, poseVertexDynamic, proceduralVertex, skinVertex, bakeVAT, sampleVAT, rotY
+	sampleBlended, channels, poseVertexDynamic, proceduralVertex, skinVertex, bakeVAT, sampleVAT, rotY,
+	bakeBoneTexture, skinVertexBaked
 } from './anim.js';
 import { TAU, hashF } from './sim.js';
 import { ensureLodBuffers } from './cull.js';
@@ -72,6 +73,12 @@ export function vertexNode( crowd, inst, anim, tier, { hull = false } = {} ) {
 
 			const skinned = skinVertex( crowd.boneBuf, anim.w, v, true );
 			v = select( anim.w.lessThan( crowd.boneCap ), skinned, v );
+
+		} else if ( system === 'bat' ) {
+
+			// Same skinning as skeletal, bones from one shared texture (baked on first use).
+			if ( ! crowd.boneTexture ) crowd.boneTexture = bakeBoneTexture();
+			v = skinVertexBaked( crowd.boneTexture, v, state, p, anim.x, anim.z, anim.y );
 
 		} else if ( system === 'vat' ) {
 

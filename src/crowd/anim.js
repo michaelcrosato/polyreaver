@@ -1,4 +1,4 @@
-// Five crowd animation systems, all driven by the same agent state + phase so
+// Six crowd animation systems, all driven by the same agent state + phase so
 // they can be compared like-for-like:
 //
 //   none        static rest pose - pure transform cost, the baseline
@@ -10,20 +10,24 @@
 //               kinematics -> 10 bone matrices per agent in a storage buffer, then
 //               linear-blend skinning in the vertex shader (smooth elbows / knees).
 //               How most game engines animate characters; costs bone memory.
+//   bat         Skeletal with a baked bone texture: the bone matrices of every clip key
+//               are computed ONCE on the CPU into a small float texture; the vertex
+//               shader fetches + interpolates them and skins like `skeletal`. No
+//               per-agent bones, so no agent cap - paid for with texture fetches.
 //   vat         Vertex Animation Texture: every vertex position of every clip frame is
 //               baked into a float texture at load time; the vertex shader just reads
 //               it. Zero joint math at runtime - the classic huge-crowd technique.
 
 import * as THREE from 'three/webgpu';
 import {
-	Fn, float, int, vec3, vec4, sin, cos, abs, max, floor, fract, select, mix, step, uniformArray,
+	Fn, If, float, int, vec3, vec4, sin, cos, abs, max, floor, fract, select, mix, step, uniformArray,
 	attribute, textureLoad, ivec2, vertexIndex, dot
 } from 'three/tsl';
-import { CHANNELS, KEYS_BAKED, STATE_COUNT, PIVOTS, clipTable, samplePose, poseVertexJS } from './clips.js';
+import { CHANNELS, KEYS_BAKED, STATE_COUNT, PIVOTS, BAKED, clipTable, samplePose, poseVertexJS } from './clips.js';
 
 const TAU = Math.PI * 2;
 
-export const ANIM_SYSTEMS = [ 'none', 'procedural', 'keyframe', 'skeletal', 'vat' ];
+export const ANIM_SYSTEMS = [ 'none', 'procedural', 'keyframe', 'skeletal', 'bat', 'vat' ];
 export const BONES = 10;
 export const BONE_ROWS = 3; // mat3x4 per bone
 
@@ -218,6 +222,142 @@ export function skinVertex( boneBuf, agentIndex, v, smooth ) {
 }
 
 // ----------------------------------------------------------------------------
+// Baked bone texture ("bat"): skeletal skinning without the per-agent compute pass.
+//
+// The skeletal system runs forward kinematics for every agent every frame and keeps
+// 480 bytes of bone matrices per agent. But an agent's pose depends only on
+// (state, phase) plus the cross-fade - so the bones of every clip at every baked key
+// can be computed ONCE on the CPU and stored in a texture. The vertex shader then
+// fetches the two keys around the agent's phase, interpolates, cross-fades with the
+// previous clip and skins exactly like skinVertex(). Nothing is stored per agent, so
+// there is no agent cap and no FK pass; the price moves into the vertex shader:
+// 12 texel fetches per vertex (2 bones x 3 rows x 2 keys), 24 while cross-fading,
+// versus 6 storage reads for `skeletal`. All agents read the same 120 KB, so the
+// fetches hit the texture cache. VAT is the far end of the same trade: it bakes the
+// final vertex POSITIONS (every vertex of every tier, ~1 MB for Hi) so the vertex
+// shader does no joint maths at all, just 2-4 fetches.
+//
+// Layout: one RGBA32F texel per mat3x4 row. Column = bone * 3 + row (30 wide),
+// row = state * KEYS_BAKED + key (256 tall): 30 x 256 x 16 B = 120 KB, shared by all
+// model tiers because the bones do not depend on the mesh.
+// ----------------------------------------------------------------------------
+export const BAT_WIDTH = BONES * BONE_ROWS;
+
+// CPU forward kinematics for one bone: the 3 x 4 affine matrix (rows of x y z w,
+// 12 floats at out[ o ]). poseVertexJS() run with the bone's BONE_PIVOTS applies the
+// same rotations, pivots and channel mapping as poseBoneStatic() on the GPU, and
+// the matrix is recovered the same way: push the origin and the three unit axes
+// through the chain.
+export function boneMatrixJS( bone, pose, out = new Float32Array( BONE_ROWS * 4 ), o = 0 ) {
+
+	const [ jA, jB ] = BONE_PIVOTS[ bone ];
+	const at = ( x, y, z ) => poseVertexJS( [ x, y, z ], bone, jA, jB, pose );
+	const org = at( 0, 0, 0 ), ex = at( 1, 0, 0 ), ey = at( 0, 1, 0 ), ez = at( 0, 0, 1 );
+	for ( let r = 0; r < BONE_ROWS; r ++ ) {
+
+		out[ o + r * 4 ] = ex[ r ] - org[ r ];
+		out[ o + r * 4 + 1 ] = ey[ r ] - org[ r ];
+		out[ o + r * 4 + 2 ] = ez[ r ] - org[ r ];
+		out[ o + r * 4 + 3 ] = org[ r ];
+
+	}
+
+	return out;
+
+}
+
+// Bakes every bone of every clip key: 10k CPU pose evaluations, a few milliseconds once.
+export function bakeBoneTexture() {
+
+	const rows = STATE_COUNT * KEYS_BAKED;
+	const data = new Float32Array( BAT_WIDTH * rows * 4 );
+	for ( let s = 0; s < STATE_COUNT; s ++ ) {
+
+		for ( let k = 0; k < KEYS_BAKED; k ++ ) {
+
+			const row = s * KEYS_BAKED + k;
+			for ( let b = 0; b < BONES; b ++ ) boneMatrixJS( b, BAKED[ s ][ k ], data, ( row * BAT_WIDTH + b * BONE_ROWS ) * 4 );
+
+		}
+
+	}
+
+	const tex = new THREE.DataTexture( data, BAT_WIDTH, rows, THREE.RGBAFormat, THREE.FloatType );
+	tex.minFilter = tex.magFilter = THREE.NearestFilter;
+	tex.generateMipmaps = false;
+	tex.needsUpdate = true;
+	tex.name = 'BoneAnimTexture';
+	tex.userData.bytes = data.byteLength;
+	return tex;
+
+}
+
+// Texture rows of the two baked keys around `phase` in clip `state`, and the fraction
+// between them (the same key maths as sampleClip / sampleVAT).
+function boneKeys( state, phase ) {
+
+	const f = fract( phase.div( TAU ) ).mul( KEYS_BAKED );
+	const k0 = floor( f );
+	const base = int( state ).mul( KEYS_BAKED );
+	return { r0: base.add( int( k0 ) ), r1: base.add( int( k0.add( 1 ).mod( KEYS_BAKED ) ) ), t: f.sub( k0 ) };
+
+}
+
+// The 3 rows of one bone matrix, interpolated between the two keys. This lerps
+// MATRICES, while `skeletal` lerps joint angles and then runs FK: a lerped rotation
+// cuts the chord of the arc, so a limb is slightly short mid-way between keys. At the
+// KEYS_BAKED = 32 keys per loop that VAT also uses, the joints turn at most 0.41 rad
+// from one key to the next, and the skinned vertices end up 0.5 mm off the
+// angle-lerped pose on average, 2 cm at worst (a hand, mid-way between two keys of
+// the fast knocked-down stagger, for a frame) - fine for a crowd. The error grows
+// with the square of the key spacing: 64 keys (240 KB) would quarter it.
+function boneRows( tex, keys, col ) {
+
+	return [ 0, 1, 2 ].map( ( r ) => mix(
+		textureLoad( tex, ivec2( col.add( r ), keys.r0 ) ),
+		textureLoad( tex, ivec2( col.add( r ), keys.r1 ) ), keys.t ) );
+
+}
+
+// Linear blend skinning from the baked texture: skinVertex() maths, with each bone
+// matrix fetched + interpolated per vertex instead of read from a per-agent buffer.
+// The cross-fade uses the same animBuf data as keyframe / skeletal (prevState,
+// prevPhase, blend) but blends the matrices - i.e. the skinned positions, like VAT -
+// not the joint angles. A fade between very different poses therefore moves a limb
+// in a straight line instead of an arc for those 0.25 s: a hand dropping from a wave
+// to walking passes up to ~0.5 m inside the arc that `skeletal` draws. Baking a
+// quaternion + joint position per bone instead would blend rotations properly, for
+// more ALU per vertex.
+export function skinVertexBaked( tex, v, state, phase, prevState, prevPhase, blend ) {
+
+	const skinIdx = attribute( 'skinIdx', 'vec2' );
+	const colA = int( skinIdx.x ).mul( BONE_ROWS ), colB = int( skinIdx.y ).mul( BONE_ROWS );
+	const cur = boneKeys( state, phase );
+	const A = boneRows( tex, cur, colA ).map( ( r ) => r.toVar() );
+	const B = boneRows( tex, cur, colB ).map( ( r ) => r.toVar() );
+
+	// Most agents are not mid-fade (blend == 1), so the previous clip's 12 fetches sit
+	// behind a branch they skip. The branch is per agent, so it rarely diverges.
+	If( blend.lessThan( 1 ), () => {
+
+		const prev = boneKeys( prevState, prevPhase );
+		const pA = boneRows( tex, prev, colA ), pB = boneRows( tex, prev, colB );
+		for ( let r = 0; r < BONE_ROWS; r ++ ) {
+
+			A[ r ].assign( mix( pA[ r ], A[ r ], blend ) );
+			B[ r ].assign( mix( pB[ r ], B[ r ], blend ) );
+
+		}
+
+	} );
+
+	const h = vec4( v, 1 );
+	const apply = ( M ) => vec3( dot( M[ 0 ], h ), dot( M[ 1 ], h ), dot( M[ 2 ], h ) );
+	return mix( apply( B ), apply( A ), attribute( 'skinW', 'float' ) );
+
+}
+
+// ----------------------------------------------------------------------------
 // Vertex Animation Texture baking (CPU, once per model tier).
 // Width = vertex count, height = STATE_COUNT * KEYS_BAKED rows of RGBA32F positions.
 // ----------------------------------------------------------------------------
@@ -341,6 +481,7 @@ export function proceduralVertex( v, jointA, jointB, table, state, p, time, seed
 export function animMemory( system, agents, models ) {
 
 	if ( system === 'skeletal' ) return agents * BONES * BONE_ROWS * 16;
+	if ( system === 'bat' ) return BAT_WIDTH * STATE_COUNT * KEYS_BAKED * 16; // one texture, any crowd size
 	if ( system === 'vat' ) return models.reduce( ( s, m ) => s + m.vertices * STATE_COUNT * KEYS_BAKED * 16, 0 );
 	if ( system === 'keyframe' ) return STATE_COUNT * KEYS_BAKED * 64;
 	return 0;

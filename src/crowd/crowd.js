@@ -4,6 +4,8 @@
 //   renderBuf[i] = ( x, animPhase, z, packed )     packed = state + 8*heading8 + 2048*colourSeed
 //   simBuf[i]    = ( targetX, targetZ, stateTimer, headingPrecise )
 //   animBuf[i]   = ( prevState, blend, prevPhase, agentIndex )   cross-fade + skeletal lookup
+//   (skeletal adds 480 B of bones per agent, capped at 131k agents; 'bat' reads the
+//   same bones from one shared baked texture instead, so it has no per-agent cost)
 // Optional (physics):
 //   collider.*   spatial hash grid, knockback state, obstacle list   (collide.js)
 //   rapierIO     Rapier-driven agents: CPU writes positions, GPU writes desired velocity
@@ -98,6 +100,7 @@ export class Crowd {
 		this.procTable = makeProcTable();
 		this.clipRates = uniformArray( CLIP_RATE, 'float' );
 		this.vatTextures = [];
+		this.boneTexture = null; // 'bat' system: baked bone matrices, built on first use
 
 		this.group = new THREE.Group();
 		this.group.name = 'Crowd';

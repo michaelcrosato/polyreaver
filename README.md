@@ -116,7 +116,7 @@ are just branches in the same shader.
 
 ### Animation systems (`src/crowd/anim.js`, `src/crowd/clips.js`)
 
-Five systems drive the same eight activities, so you can compare looks and costs directly:
+Six systems drive the same eight activities, so you can compare looks and costs directly:
 
 | System | Where the work happens | Looks | Cost profile |
 |---|---|---|---|
@@ -124,11 +124,18 @@ Five systems drive the same eight activities, so you can compare looks and costs
 | Procedural sine | vertex shader, per vertex | lively but mechanical; activities *pop* when they change | cheapest moving option |
 | Keyframe clips | vertex shader, per vertex, samples a 32-key table | hand-keyed poses (walk contact/passing, jumps, disco points), smooth cross-fades | more ALU and uniform reads per vertex; scales with vertices |
 | Skeletal skinning | compute pass per **agent** builds 10 bone matrices, vertex shader skins | same clips, plus smooth elbows/knees from blended weights | 480 bytes per agent per frame (capped at 131k agents / 63 MB); needs storage buffers in the vertex stage |
+| Skeletal, baked bone texture | load time: the 10 bone matrices of every clip key baked into one float texture (30 × 256 texels, 120 KB); vertex shader fetches the two keys around the agent's phase, interpolates, skins | same as skeletal (matrices are interpolated between keys: sub-millimetre differences on average); cross-fades blend matrices, so a limb cuts a straight line instead of an arc for 0.25 s | no per-agent memory, no compute pass, **no agent cap**; 12 texture reads per vertex (24 while cross-fading); no storage buffers needed |
 | Baked VAT | load time: every vertex of every clip frame baked into a float texture | identical to keyframe (it *is* the keyframe result) | 2-4 texture reads per vertex, zero joint maths; memory grows with vertices × frames |
 
 The clips are 8 authored key poses per activity, resampled with a Catmull-Rom spline into 32 keys,
 over 16 joint channels. The same data feeds the GPU keyframe sampler, the skeletal compute pass,
-and the CPU VAT baker, so they all show identical motion.
+and the CPU bone-texture and VAT bakers, so they all show the same motion.
+
+Skeletal vs. baked bone texture is the classic crowd trade: per-agent bones cost memory and a
+compute pass that scales with the crowd, but only 6 reads per vertex; baked bones cost nothing per
+agent, but every vertex fetches and interpolates its bones from the texture. As a rule of thumb,
+many low-poly characters favour the texture and fewer, detailed ones favour per-agent bones -
+compare both with *Measure effect costs*.
 
 **Two render paths:**
 
@@ -189,8 +196,8 @@ shaders, so expect a one-off hitch).
 | Character model | Tetra - 24 tris | ●●○○ moderate | vertex | Triangles per character. Vertex cost scales linearly with it. In GPU-driven mode this is the MAXIMUM detail: distant agents drop to cheaper models automatically. **Mobile:** Mobile GPUs are often vertex-limited long before fill-limited with tiny triangles. Sub-pixel triangles are wasted work on every GPU. |
 | Render path | Direct: 1 instanced draw, no culling | ●○○○ cheap | vertex / compute | Direct draws every agent even if it is off screen. GPU-driven runs a compute pass that frustum-culls each agent, picks a level of detail from its on-screen size, and writes compacted per-LOD lists that are drawn with drawIndexedIndirect. The CPU never learns how many are visible. This is how modern engines draw huge crowds. **Mobile:** GPU-driven wins as soon as a large part of the crowd is off screen or far away (perspective views). In a zoomed-out isometric view everything is visible and it can be slightly slower. |
 | Automatic LOD (GPU-driven only) | on | ●○○○ free | vertex | Swap to cheaper models when a character is only a few pixels tall. Thresholds: >150 px Hi, >60 px Box-man, >22 px Prism, otherwise Tetra. |
-| Animation system | Procedural sine (per vertex) | ●●○○ moderate | vertex / compute / memory | Five ways to animate the same crowd, all driving the same 8 activities. Procedural: sine curves per joint, cheapest, states pop. Keyframe: hand-keyed clips (walk contact/passing poses, jumps, disco points...) sampled per vertex from a table, with cross-fades - nicer motion, more ALU per vertex. Skeletal: the clips are sampled ONCE per agent in a compute pass that builds 10 bone matrices (480 bytes/agent/frame), then the vertex shader skins with smooth weights (elbows and knees bend instead of hinging) - the standard game-engine approach, heavy on memory and bandwidth. VAT: every vertex position of every clip frame is baked into a float texture at load time - the vertex shader just reads it back, zero joint maths. **Mobile:** Skeletal needs storage buffers in the vertex stage (some older phones have none - it falls back to keyframe) and ~63 MB for 131k agents. VAT and procedural are the mobile-friendly choices. |
-| Cross-fade between activities | on | ●○○○ cheap | vertex | Keyframe / skeletal / VAT blend the outgoing and incoming clip over 0.25 s instead of snapping. Costs a second clip sample per vertex (or per agent for skeletal). |
+| Animation system | Procedural sine (per vertex) | ●●○○ moderate | vertex / compute / memory | Six ways to animate the same crowd, all driving the same 8 activities. Procedural: sine curves per joint, cheapest, states pop. Keyframe: hand-keyed clips (walk contact/passing poses, jumps, disco points...) sampled per vertex from a table, with cross-fades - nicer motion, more ALU per vertex. Skeletal: the clips are sampled ONCE per agent in a compute pass that builds 10 bone matrices (480 bytes/agent/frame), then the vertex shader skins with smooth weights (elbows and knees bend instead of hinging) - the standard game-engine approach, heavy on memory and bandwidth. Baked bone texture: the same bone matrices, but computed once at load time for every clip key and stored in one 120 KB texture; the vertex shader fetches the two keys around the phase of each agent, interpolates and skins - no compute pass and no memory per agent (so no 131k cap), paid for with 12 texture reads per vertex (24 while cross-fading). The classic way to skin huge crowds. VAT: every vertex position of every clip frame is baked into a float texture at load time - the vertex shader just reads it back, zero joint maths. **Mobile:** Skeletal needs storage buffers in the vertex stage (some older phones have none - it falls back to keyframe) and ~63 MB for 131k agents. The baked bone texture needs neither (plain texture reads, 120 KB in total), so it brings smooth skinning to those phones too, but its 12-24 reads per vertex add up on vertex-limited GPUs - pair it with low-poly models. VAT and procedural remain the mobile-friendly choices. |
+| Cross-fade between activities | on | ●○○○ cheap | vertex | Keyframe / skeletal / baked bones / VAT blend the outgoing and incoming clip over 0.25 s instead of snapping. Costs a second clip sample per vertex (or per agent for skeletal; baked bones only pay it while an agent is fading). |
 | Behaviour | Wander (random activities) | ●○○○ cheap | compute | All simulation runs in one compute shader, so behaviour changes are free on the CPU. "Converge" packs everyone around the hero: huge overdraw hot-spot. |
 | Density (people / m²) | 0.35 | ●○○○ cheap | fill | How tightly the crowd is packed. Denser crowds overlap more on screen (overdraw) and the world gets smaller. |
 | Activity (share walking) | 0.6 | ●○○○ free | compute | Chance that an agent picks walking/running over standing activities when its timer runs out. |
@@ -297,8 +304,10 @@ animation) and *Physics playground* (Rapier bodies raining on a colliding crowd)
   pixel; clustered only evaluates the lights near that pixel.
 * **Converge on hero** piles the whole crowd into one spot: an overdraw worst case. With physics on,
   the GPU collisions keep people from overlapping and the pile spreads out instead.
-* **Animation systems** at the same crowd size: procedural vs keyframe vs skeletal vs VAT. Zoom in
-  on Box-man models to see the difference in motion and joints, then run *Measure effect costs*.
+* **Animation systems** at the same crowd size: procedural vs keyframe vs skeletal vs baked bones vs
+  VAT. Zoom in on Box-man models to see the difference in motion and joints, then run *Measure effect
+  costs*. Above 131k agents skeletal leaves the extra agents in their rest pose; baked bones animate
+  everyone.
 * **GPU vs Rapier crowd collisions**: GPU handles every agent for a few milliseconds of compute;
   Rapier handles a few thousand with exact two-way contacts but costs CPU time and a round trip.
 * **Pixel filters** often make the frame *cheaper*, because the scene really renders at 144-240 lines.
@@ -328,8 +337,8 @@ src/crowd/crowd.js      Crowd class: lifecycle, settings, per-frame compute orde
 src/crowd/sim.js        compute kernels: init, simulation/AI, skeletal bones, physics proxies
 src/crowd/cull.js       GPU-driven path: frustum + screen-size LOD cull, indirect draws
 src/crowd/materials.js  crowd vertex shader per animation system, materials, meshes
-src/crowd/anim.js       the five animation systems (procedural, keyframe, skeletal, VAT)
-src/crowd/clips.js      hand-keyed animation clips + CPU pose chain (VAT baking)
+src/crowd/anim.js       the six animation systems (procedural, keyframe, skeletal, baked bones, VAT)
+src/crowd/clips.js      hand-keyed animation clips + CPU pose chain (bone texture + VAT baking)
 src/crowd/models.js     procedural low-poly character tiers (+ skin weights)
 src/crowd/collide.js    GPU spatial-hash crowd collisions
 src/world.js            World: plaza, props, settings entry points

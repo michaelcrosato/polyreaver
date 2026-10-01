@@ -16,7 +16,7 @@ import { CrowdCollider } from './collide.js';
 import { buildCull } from './cull.js';
 
 export const TAU = Math.PI * 2;
-const SKELETAL_MAX = 131072; // bone buffer cap: 131k agents x 480 B = 63 MB
+const SKELETAL_MAX = 131072; // bone buffer cap: 131k agents x 480 B = 63 MB ('bat' has no buffer, no cap)
 export const MAX_PROXIES = 4096;
 
 // Integer hashing: the multiply must wrap in u32 (float math would saturate for
