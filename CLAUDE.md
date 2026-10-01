@@ -41,3 +41,6 @@ tool: `set` `commands/<id>` = `{ "cmd": "...", "args": {...}, "status": "pending
 `screenshot` (asset id → `Artifact` read with `path`), `sequence {steps, continueOnError}`.
 `devices/*` lists devices that opened it; `runs/*` holds benchmarks the user ran from the panel.
 The tab must be in the foreground; results can take a while (`effects` ≈ 1-2 min).
+Measuring: a lightly loaded desktop GPU drops its clocks and its timestamps become noise (±4 ms). Compare
+settings at a heavy load (GPU ≥ ~5 ms, e.g. 1M Tetra or 131k Hi agents, direct path) or use `effects`,
+which adds the ballast itself. `maxCrowd` judges GPU/CPU time when timestamps exist.
