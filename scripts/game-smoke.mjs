@@ -1,6 +1,7 @@
 // Headless smoke test for Polyreaver (the showcase game): boots the single-file
 // build in Chromium with the SwiftShader software GPU, visits the town, plays a
-// level with the built-in bot (or a trivial fallback), and fails on any page error,
+// level with the built-in bot (or a trivial fallback), opens every UI panel, builds two
+// Workshop galleries, and fails on any page error,
 // WebGPU validation error or fatal screen. Proves things run, not how fast.
 //
 //   npm run build:game && node scripts/game-smoke.mjs [--shots dir/] [--depth 3] [--url ...]
@@ -137,6 +138,33 @@ await step( 'back to town', async () => {
 
 	await page.evaluate( () => window.game.enterTown() );
 	await frames( 5 );
+
+} );
+
+// every registered UI panel opens, draws and closes (inventory, tree, vendor, map ...)
+await step( 'every panel', async () => {
+
+	const ids = await page.evaluate( () => [ ...window.ui.panels.keys() ] );
+	for ( const id of ids ) {
+
+		await page.evaluate( ( id ) => window.ui.open( id, true ), id );
+		await frames( 2 );
+		await page.evaluate( ( id ) => window.ui.open( id, false ), id );
+
+	}
+
+	await frames( 2 );
+	return `${ids.length} panels`;
+
+} );
+
+await step( 'workshop galleries', async () => {
+
+	const n = await page.evaluate( () => [ window.api( 'lab.monsters', { n: 6 } ).length, window.api( 'lab.actions', {} ).length ] );
+	await frames( 3 );
+	await page.evaluate( () => window.api( 'lab.clear' ) );
+	await frames( 3 );
+	return n.join( ' + ' ) + ' lab entities';
 
 } );
 

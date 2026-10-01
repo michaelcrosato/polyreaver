@@ -75,7 +75,7 @@ for ( let depth = d0; depth <= ( d1 || d0 ); depth ++ ) {
 		depth, name: s.spec?.name, areaLevel: s.level, playerLevel: game.save.level, simSeconds: +t.toFixed( 1 ),
 		realMs: Math.round( performance.now() - t0 ), kills: s.stats.kills, deaths: s.stats.deaths,
 		dps: Math.round( s.stats.damageDealt / Math.max( 1, t ) ), damageTaken: Math.round( s.stats.damageTaken ),
-		alive: s.entities, complete: !! world.state.complete
+		alive: world.player.alive, enemiesLeft: world.entities.filter( ( e ) => e.alive && e.team === 1 && e.kind !== 'prop' ).length, complete: !! world.state.complete
 	} );
 
 }

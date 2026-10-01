@@ -12,7 +12,8 @@
     "smoke": "node scripts/smoke.mjs",
     "smoke:quick": "node scripts/smoke.mjs --quick",
     "build:game": "vite build --config vite.game.config.js && node scripts/postbuild-game.mjs",
-    "sim": "node scripts/sim.mjs"
+    "sim": "node scripts/sim.mjs",
+    "smoke:game": "node scripts/game-smoke.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",

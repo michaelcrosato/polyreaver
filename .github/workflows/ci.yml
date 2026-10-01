@@ -1,5 +1,6 @@
-# Runs on every push: lint + build (about a minute). The built single-file HTML
-# is attached to the run so it can be downloaded from the Actions tab.
+# Runs on every push: lint, both builds and a short headless game simulation (a
+# couple of minutes). The built single-file HTMLs are attached to the run so they
+# can be downloaded from the Actions tab.
 name: Build
 
 on:
@@ -20,13 +21,24 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
-      - name: Check the committed single-file build is current
+      - run: npm run build:game
+      - name: Check the committed single-file builds are current
         run: |
-          if ! git diff --quiet -- webgpu-crowd-stress.html; then
-            echo "::warning file=webgpu-crowd-stress.html::The committed webgpu-crowd-stress.html is older than the source. Run npm run build and commit it."
-          fi
+          for f in webgpu-crowd-stress.html polyreaver.html; do
+            if ! git diff --quiet -- "$f"; then
+              echo "::warning file=$f::The committed $f is older than the source. Rebuild and commit it."
+            fi
+          done
+      # the real game simulation in Node (no GPU): crashes in any feature fail the build
+      - run: npm run sim -- --depth 1-4 --seconds 45
+      - run: npm run sim -- --depth 25 --seconds 30
       - uses: actions/upload-artifact@v4
         with:
           name: webgpu-crowd-stress
           path: webgpu-crowd-stress.html
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyreaver
+          path: polyreaver.html
           retention-days: 30
