@@ -237,3 +237,32 @@ head look-at, idle variety); ambient townsfolk can use the GPU crowd.
 * WebGPU only. ≤ 8 storage buffers per shader stage (phones). No texture assets: everything is procedural.
 * three.js "mdcs" style (tabs, `foo( a, b )`, blank lines inside function bodies). Comments are teaching notes.
 * Tests: `npm run lint`, `npm run build:game`, `node scripts/game-smoke.mjs`, `node scripts/sim.mjs`.
+
+## 12. Monsters feature — contracts it adds (`features/monsters`, map in its `sim.js`)
+
+* **Spawning**: `spawnMonster( world, { family, level, rarity: normal|magic|rare|unique, affixes?, archetype?, x, z, genome? } )`,
+  `spawnBoss( world, id|def, { x, z, level, arena, dormant } )`, `composeFamily( seed, depth )`, `composeBoss( seed, depth, { mechanics } )`,
+  `describeFamily / describeBoss / describeMonster` (exported from `features/monsters/sim.js`); agent commands `monsters.*`
+  ( `catalog families family compose composeBoss boss spawn spawnBoss inspect encounter` ).
+* **Level spec** (world feature): `families: [ monsterFamily ids ]`, `boss: id | null` (null = no boss: the exit opens when the level is
+  cleared), `level`, `depth`, `theme`, `mechanics`. Unknown or missing ids fall back to the campaign families / boss of the depth,
+  theme or mechanic (13–20: designed boss "Ascended" remix, 21+: composed). Campaign ids, depth 1–12:
+  `cinder-imp slag-hound quarry-brute blastling` / `drowned crypt-crawler bone-archer` / `gloom-stalker lantern-wisp grave-warden` /
+  `frostfang-wolf rime-yeti ice-wraith` / `spark-drone forge-golem coil-sentry` / `star-weaver rift-stalker` / `magma-crab ember-drake lava-spawn` /
+  `void-maw moon-mite watcher-eye` / `glass-sentinel mirror-shade` / `ash-drone hive-warrior hive-spitter` / `clock-sentry gear-knight cog-spider` /
+  `bog-lurker plague-toad rot-shaman rot-grub`; bosses `gorrak-blastjaw morvane umbra hrimgar voltrix nyx pyrrhox hollow-maw vitreus cindrel horologist mother-rot`.
+  The boss is placed at the centre of the `kind: 'boss'` room (arena = that room); Lightless reads `layout.lights` ( `{ x, z, range, lit }` ).
+* **Model fields** for the rig renderer: `model.rarity`, `model.glow` / `model.tint` (CSS colours), `model.affixes` ( `[ { id, color } ]` ),
+  `model.hidden` (burrowed / vanished — do not draw the body), `model.boss`; `data.guarding` (shield raised), `data.charging`. Powder kegs are
+  `kind: 'prop'`, `model { type: 'prop', id: 'barrel' }`.
+* **fx hints** on areas / projectiles: `slash bite claw thrust slam quake spikes lava erupt explosion meteor fire ice lightning poison void dust
+  beam charge drain web shout ward heal summon emerge rift echo time frost-aura conduit-shield telegraph` and projectiles
+  `bolt arrow shard spit lob barrel fire ice lightning poison`. An area in its `delay` is a telegraph ( `data.telegraph` marks
+  pure warnings and fuses); `color` and `element` are always set.
+* **Events**: `bossIntro { boss, name, title, text, duration }`, `bossPhase { boss, phase, index, name, total }`, `bossEnrage`, `bossPattern
+  { boss, pattern, name }`, `aggro { entity, target }`, `ambush { x, z, count }`, `summon { entity, minions }`, `affix { entity, id, kind }`,
+  `blink { entity, x, z, tx, tz }`, `burrow` / `vanish` / `emerge { entity }`, `explode { entity, x, z, radius }`, `heal { entity, amount }`,
+  `guardBreak { entity }`, `exitOpen { x, z, reason: 'boss' | 'cleared' }`.
+* **Statuses** (monster-side, `m-` prefix): `m-frenzy m-ward m-slow m-haste m-enraged m-exposed m-root m-burrowed m-vanished`.
+* **World state**: `world.state.director` (families, boss, packs), `world.state.bossActive` (boss entity after its intro), `world.state.exitOpen`.
+* **Rewards**: `data.xp`, `data.rarity`, `data.lootMult` (normal 1, magic 2.5, rare 6, unique 12, boss 30; summons × 0.3, illusions 0).
