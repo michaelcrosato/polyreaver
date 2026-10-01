@@ -7,6 +7,7 @@
 //     mount( ui ) -> HTMLElement    build once; appended to #ui
 //     update( ui, game, dt )        every frame while visible (keep it cheap)
 //     onOpen( ui ), onClose( ui )
+//     pauseButton: 'Workshop'       optional: a button in the pause menu opens it
 //   } )
 //
 // Built in here: the HUD (life, mana, XP, area name, toasts) and the pause / debug
@@ -249,6 +250,13 @@ define( 'uiPanel', { id: 'pause', order: 90, toggle: 'pause-menu', modal: true,
 					}
 
 				} ) ),
+			// any panel can put itself here: define( 'uiPanel', { ..., pauseButton: 'Workshop' } )
+			h( 'div', { class: 'btns' }, all( 'uiPanel' ).filter( ( d ) => d.pauseButton ).map( ( d ) => btn( d.pauseButton, () => {
+
+				ui.open( 'pause', false );
+				ui.open( d.id, true );
+
+			} ) ) ),
 			h( 'p', { class: 'dim', text: 'Sliders apply immediately to everything already alive. Agents: game.api("tuning.set", {...}).' } ) );
 
 	},

@@ -38,6 +38,7 @@ export function enterLab( game, { title = 'Workshop', n = 12, spacing = 4 } = {}
 	const world = game._startWorld( layout, { id: 'lab', name: title, level: 1, generator: 'arena' }, 'lab' );
 	world.player.flags.invulnerable = true;
 	world.player.controller = null;
+	world.player.model = { ...world.player.model, hidden: true };
 	world.state.labels = [];
 	world.state.labCamera = { x: 0, z: 0, height: Math.max( cols, rows * 1.4 ) * spacing * 0.9 + 6 };
 	const at = ( i ) => ( {

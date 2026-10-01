@@ -1,9 +1,11 @@
 // Agent tools - presentation side: the in-game inspector (` key) with hitbox /
-// area overlay, browser-only API commands (screenshot, perf) and the Claude link.
+// area overlay, the Workshop (lab galleries, loot roller, in-browser balance sim),
+// browser-only API commands (screenshot, perf) and the Claude link.
 
 import './sim.js';
 import './inspector.js';
 import './link.js';
+import './workshop.js';
 import { define } from '../../core/registry.js';
 
 define( 'apiCommand', { id: 'perf', desc: 'Renderer statistics for the last frame (browser only).', run( game ) {

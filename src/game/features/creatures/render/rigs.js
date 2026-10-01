@@ -242,6 +242,7 @@ export class RigRenderer {
 			if ( ! m || RIG_TYPES.indexOf( m.type ) < 0 ) continue;
 			const inst = this.instFor( e );
 			inst.seen = seen;
+			if ( m.hidden ) continue; // burrowed, or hidden by a lab: keep the instance, draw nothing
 			const l = rc.lerp( e, this.l );
 			const T = inst.T, s = inst.size;
 			// cull: skip rigs well outside the view (with a margin for their shadows)
