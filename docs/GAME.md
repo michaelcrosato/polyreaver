@@ -72,7 +72,7 @@ override baseline). Kinds:
 | `boss` | monsters | designed boss (genome, phases, patterns) |
 | `bossPattern` | monsters | reusable boss attack pattern (slam ring, bullet spiral, charge, summon…) |
 | `itemBase` | progression | `{ id, slot, name, tags, implicit, damage?, attackSpeed?, weaponClass?, model }` |
-| `affix` | progression | `{ id, kind: 'prefix'\|'suffix', tags (slots it can roll on), tiers: [{ level, min, max }], stat/type/stat tags, weight }` |
+| `affix` | progression | `{ id, affixType: 'prefix'\|'suffix', tags (base tags it can roll on), text, stats: [{ stat, type, tags? }], tiers: [{ level, ranges }], weight }` (not `kind`: define() overwrites `def.kind`) |
 | `unique` | progression | named item with fixed mods + a unique mechanic hook |
 | `currency` | progression | crafting orbs |
 | `treeNode` | progression | generated passive nodes (data), or `treeCluster` templates |
