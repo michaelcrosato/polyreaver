@@ -15,7 +15,7 @@ import { define, get } from '../core/registry.js';
 import { h } from '../ui/shell.js';
 
 const KEY = 'polyreaver.gfx';
-const gfx = { post: 'auto', bloom: 1, scale: 1 };
+const gfx = { post: 'auto', bloom: 1, scale: 1, msaa: true };
 try {
 
 	Object.assign( gfx, JSON.parse( localStorage.getItem( KEY ) || '{}' ) );
@@ -29,12 +29,16 @@ const u = {
 	bloom: uniform( 0.6 ), sat: uniform( 1 ), contrast: uniform( 1 ), vignette: uniform( 0.35 ), tint: uniform( new THREE.Color( 1, 1, 1 ) )
 };
 
+// The graph depends on two switches (MSAA in the scene pass, bloom on/off); the rest
+// are uniforms. buildKey() changes -> the pipeline is rebuilt once.
+const buildKey = () => `${gfx.msaa && ! coarse()}:${gfx.bloom > 0}`;
+
 function build( rc ) {
 
 	const pipeline = new THREE.RenderPipeline( rc.renderer );
-	const scene = pass( rc.scene, rc.camera, { samples: coarse() ? 0 : 4 } );
-	const glow = bloom( scene, u.bloom, 0.45, 0.88 );
-	let out = renderOutput( vec4( scene.rgb.add( glow.rgb ), 1 ) );
+	const scene = pass( rc.scene, rc.camera, { samples: gfx.msaa && ! coarse() ? 4 : 0 } );
+	const color = gfx.bloom > 0 ? scene.rgb.add( bloom( scene, u.bloom, 0.45, 0.88 ).rgb ) : scene.rgb;
+	let out = renderOutput( vec4( color, 1 ) );
 	let rgb = saturation( out.rgb, u.sat );
 	rgb = rgb.sub( 0.5 ).mul( u.contrast ).add( 0.5 ).mul( u.tint );
 	const edge = smoothstep( float( 0.3 ), float( 0.85 ), screenUV.sub( 0.5 ).length() );
@@ -77,7 +81,15 @@ define( 'renderSystem', { id: 'game-post', order: 98,
 
 		if ( postOn() ) {
 
-			this.pipeline ||= build( rc );
+			const key = buildKey();
+			if ( this.key !== key ) {
+
+				this.pipeline?.dispose();
+				this.pipeline = build( rc );
+				this.key = key;
+
+			}
+
 			rc.post = this.pipeline;
 
 		} else rc.post = null;

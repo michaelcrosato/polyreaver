@@ -26,7 +26,8 @@ src/game/
   game.js          Game: save, tuning, input state, worlds (town/levels), fixed-step clock
   sim-entry.js     imports every feature's sim.js (Node scripts import this)
   main.js          browser boot: WebGPU renderer, RenderContext, UI, input, frame loop
-  render/          RenderContext + grey-box placeholder renderers (replaced feature by feature)
+  render/          RenderContext, grey-box placeholder renderers (replaced feature by feature), post.js (each
+                   theme's bloom + grade + vignette in one pass; Graphics panel; game.gfx)
   ui/shell.js      UI shell: panel registry, HUD, toasts, pause/debug menu (difficulty sliders)
   input.js         baseline keyboard/mouse input (combat feature replaces it)
   content/baseline.js   minimal playable defs (fallbacks; features override by redefining ids)

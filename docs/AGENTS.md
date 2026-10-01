@@ -224,6 +224,11 @@ runs the same simulation in the browser.
   - Integer codes passed as instance attributes arrive interpolated, so round them before
     comparing.
   - A value used inside several `If` blocks must be `.toVar()`'d first.
+- **SwiftShader limits.** Headless Chromium's software GPU is slow: about 1-2 s per frame in a
+  level. It also stops producing frames after about 70 frames when the bloom pass is on.
+  Real GPUs are fine. The smoke test turns post-processing off (`game.gfx.set( { post: 'off' } )`)
+  and checks it in one short step; do the same in your own scripts. A page that "hangs" with
+  no error is usually this, not your code.
 - **Style.** three.js "mdcs": tabs, `foo( a, b )`, a blank line after an opening function
   brace and before the closing one. Comments are teaching notes; keep them true when you
   change the code.

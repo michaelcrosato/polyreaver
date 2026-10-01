@@ -72,6 +72,10 @@ await step( 'boot + town', async () => {
 
 	await page.goto( url );
 	await page.waitForFunction( () => window.__fatal || window.game?.frameCount >= 5, null, { timeout: 180000 } );
+	// post-processing off for the long steps: under SwiftShader the bloom pass stalls the
+	// GPU process after ~70 frames (real GPUs are fine); the 'post-processing' step below
+	// checks the pipeline separately, briefly
+	await page.evaluate( () => window.game.gfx?.set( { post: 'off' } ) );
 	// nothing modal may be open when the game starts (a panel without a toggle starts open)
 	const modal = await page.evaluate( () => [ ...window.ui.panels ].filter( ( [ , p ] ) => p.open && p.def.modal ).map( ( [ id ] ) => id ) );
 	if ( modal.length ) throw new Error( 'modal panel open at boot: ' + modal.join( ', ' ) );
@@ -120,6 +124,17 @@ await step( `level ${depth} with bot`, async () => {
 
 	}, seconds );
 	return JSON.stringify( r );
+
+} );
+
+await step( 'post-processing', async () => {
+
+	if ( ! await page.evaluate( () => !! window.game.gfx ) ) return 'no gfx module';
+	await page.evaluate( () => window.game.gfx.set( { post: 'on' } ) );
+	await frames( 8 );
+	await page.evaluate( () => window.game.gfx.set( { post: 'off' } ) );
+	await frames( 2 );
+	return '8 frames with bloom + grade';
 
 } );
 
