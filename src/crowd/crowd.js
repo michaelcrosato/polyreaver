@@ -272,6 +272,22 @@ export class Crowd {
 		if ( 'lodEnabled' in options ) this.lodEnabled = options.lodEnabled;
 		if ( recompute ) this._buildComputes();
 		if ( rebuild ) this._rebuildMeshes();
+		// Leaving skeletal: nothing references the per-agent bones any more (the new
+		// meshes and kernels are built), so give the up-to-63 MB back to the GPU now.
+		if ( this.boneBuf && this.animSystem !== 'skeletal' ) this._freeBones();
+
+	}
+
+	_freeBones() {
+
+		try {
+
+			this.renderer._attributes?.delete( this.boneBuf.value );
+
+		} catch { /* never uploaded */ }
+
+		this.boneBuf = null;
+		this.boneCap = 0;
 
 	}
 
