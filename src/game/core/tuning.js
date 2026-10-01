@@ -32,15 +32,19 @@ export const TUNING_SLIDERS = [
 export const SIM_HZ = 60; // fixed simulation rate; rendering interpolates between steps
 export const TEAM = { PLAYER: 0, ENEMY: 1, NEUTRAL: 2 };
 
-// Monster level -> stat multipliers. Exponential so the game scales forever:
-// level 100 monsters have ~550x the life of level 1 ones, and the player keeps up
-// through gear tiers and the tree (balanced by scripts/sim.mjs).
+// Monster level -> stat multipliers. Exponential so the game scales forever, but
+// shallow enough that a character with level-appropriate gear and passives keeps up
+// to about level 100 (area depth ~50): measured with the 'player.kit' stand-in, kill
+// times grow ~2.5x and hits-to-die shrink ~2x from level 10 to 100. Past that the
+// endless depths keep climbing and every character eventually meets its wall.
+// Re-check with scripts/sim.mjs after changing gear, tree or skill numbers.
 export function monsterScaling( level ) {
 
 	const l = Math.max( 1, level );
 	return {
-		life: Math.pow( 1.065, l - 1 ) * ( 1 + ( l - 1 ) * 0.04 ),
-		damage: Math.pow( 1.055, l - 1 ) * ( 1 + ( l - 1 ) * 0.02 ),
+		life: Math.pow( 1.048, l - 1 ) * ( 1 + ( l - 1 ) * 0.012 ),
+		// the first ten levels ramp up to full bite (x1.3): gentle start, challenging after
+		damage: Math.pow( 1.03, l - 1 ) * ( 1 + ( l - 1 ) * 0.004 ) * ( 1 + 0.3 * Math.min( 1, ( l - 1 ) / 10 ) ),
 		xp: Math.pow( 1.06, l - 1 ) * ( 1 + ( l - 1 ) * 0.05 ),
 		armor: 5 * l,
 		res: Math.min( 40, Math.floor( l / 3 ) )

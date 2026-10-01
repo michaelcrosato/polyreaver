@@ -5,6 +5,8 @@
 //   node scripts/sim.mjs                      depth 1, 60 s, default bot
 //   node scripts/sim.mjs --depth 1-12         each depth in turn
 //   node scripts/sim.mjs --depth 5 --seconds 120 --seed abc --json
+//   node scripts/sim.mjs --depth 1-20 --naked   starter gear only (default: 'player.kit',
+//                                               rare gear + passives for the character level)
 //
 // The tools feature registers a smarter bot (api 'bot.run'); without it this
 // script uses a simple chase-swing-dodge loop.
@@ -23,6 +25,7 @@ const [ d0, d1 ] = String( opt( '--depth', '1' ) ).split( '-' ).map( Number );
 const seconds = + opt( '--seconds', 60 );
 const seed = opt( '--seed', 'sim' );
 const asJson = argv.includes( '--json' );
+const naked = argv.includes( '--naked' );
 
 function simpleBot( game, dt ) {
 
@@ -52,6 +55,7 @@ for ( let depth = d0; depth <= ( d1 || d0 ); depth ++ ) {
 	game.save.level = Math.max( 1, depth * 2 - 1 );
 	game.applyPlayerStats();
 	const world = game.enterLevel( depth );
+	if ( ! naked && game.api ) game.api( 'player.kit', { level: game.save.level } );
 	const t0 = performance.now();
 	const bot = game.api?.( 'bot.create', {} );
 	let t = 0;

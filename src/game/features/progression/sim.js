@@ -31,7 +31,8 @@ import { updateFlasks, pollPotionInput, drinkFlask } from './flasks.js';
 import { lootSimulation, pickupLoot, lootEntities } from './loot.js';
 import { rollItem, describeItem, itemSummary, makeItem, makeUnique } from './items.js';
 import { treeSummary, allocatePath, getTree, treeStats, respec, pointsLeft } from './tree.js';
-import { skillLevel } from './skills.js';
+import { skillLevel, maxSkillLevel } from './skills.js';
+import { EQUIP_SLOTS } from './data/bases.js';
 import { addToInventory, listItems, applyCurrency, equipFrom } from './inventory.js';
 import { simulateStats, estimateAttack } from './stats.js';
 import { RNG } from '../../core/rng.js';
@@ -125,6 +126,134 @@ define( 'apiCommand', { id: 'items.give', desc: 'Give an item (base, unique, or 
 		if ( i < 0 ) return { ok: false, reason: 'Inventory is full' };
 		if ( equip ) equipFrom( game, { where: 'inv', index: i } );
 		return { ok: true, item: describeItem( item ) };
+
+	} } );
+// A stand-in for a character that has PLAYED to `level`: rare gear in every slot,
+// passive points spent greedily on life / attack damage / defences, bar skills at
+// the level cap. Balance sims use it so depth N is fought with a depth-N character
+// instead of a naked one ( npm run sim -- --kit ).
+const KIT_WEIGHTS = { life: 1.6, attack_speed: 1.3, life_leech: 1.2, armor: 0.7, block_chance: 0.6, evade_chance: 0.6, area: 0.6, life_regen_pct: 0.8,
+	life_on_kill: 0.5, res_fire: 0.5, res_cold: 0.5, res_lightning: 0.5, crit_chance: 0.4, crit_multi: 0.3, move_speed: 0.4, shield: 0.4, stun_threshold: 0.3, strength: 0.08, dexterity: 0.04, intelligence: 0.03 };
+const KIT_TAGS = new Set( [ 'attack', 'melee', 'physical', 'area', 'fire', 'cold', 'spell' ] );
+
+function kitScore( node ) {
+
+	if ( node.type === 'keystone' ) return - 99;
+	let v = 0;
+	for ( const m of node.mods || [] ) {
+
+		const w = m.stat === 'damage' ? ( ! m.tags || m.tags.every( ( t ) => KIT_TAGS.has( t ) ) ? 1 : 0.15 ) : KIT_WEIGHTS[ m.stat ] ?? 0.05;
+		v += w * m.value / ( m.type === 'flat' && w < 0.1 ? 1 : 10 );
+
+	}
+
+	return v;
+
+}
+
+export function spendPassives( save ) {
+
+	const T = getTree(), t = Tree.treeState( save );
+	let guard = 400;
+	while ( pointsLeft( save ) > 0 && guard -- > 0 ) {
+
+		// one breadth-first pass from the tree: best value per point among reachable nodes
+		const alloc = new Set( t.allocated ), prev = new Map(), cum = new Map(), dist = new Map(), queue = [];
+		for ( const a of alloc ) for ( const nb of T.nodes.get( a )?.links || [] ) if ( ! alloc.has( nb ) && ! prev.has( nb ) ) {
+
+			prev.set( nb, null ); dist.set( nb, 1 ); cum.set( nb, kitScore( T.nodes.get( nb ) ) ); queue.push( nb );
+
+		}
+
+		const budget = pointsLeft( save );
+		let best = null, bestV = - Infinity;
+		for ( let qi = 0; qi < queue.length; qi ++ ) {
+
+			const c = queue[ qi ], d = dist.get( c );
+			const v = cum.get( c ) / d;
+			if ( v > bestV ) {
+
+				bestV = v; best = c;
+
+			}
+
+			if ( d >= budget ) continue;
+			for ( const nb of T.nodes.get( c ).links ) if ( ! alloc.has( nb ) && ! prev.has( nb ) ) {
+
+				prev.set( nb, c ); dist.set( nb, d + 1 ); cum.set( nb, cum.get( c ) + kitScore( T.nodes.get( nb ) ) ); queue.push( nb );
+
+			}
+
+		}
+
+		if ( ! best ) break;
+		const path = [];
+		for ( let c = best; c !== null; c = prev.get( c ) ) path.unshift( c );
+		t.allocated.push( ...path );
+
+	}
+
+	return t.allocated.length - 1;
+
+}
+
+define( 'apiCommand', { id: 'player.kit', desc: 'Make the character a played-to-level stand-in: rare gear in every slot, passives spent, bar skills levelled (balance sims)', args: { level: 'character level', rarity: 'gear rarity (rare)', seed: 'seed', tree: 'spend passives (true)' },
+	run: ( game, { level = game.save.level, rarity = 'rare', seed = 'kit', tree = true } = {} ) => {
+
+		const s = ensureSave( game.save ), rng = new RNG( `kit:${seed}:${level}` );
+		s.level = Math.max( 1, Math.round( level ) );
+		s.xp = 0;
+		if ( tree ) {
+
+			respec( s, Tree.treeState( s ).start );
+			spendPassives( s );
+
+		}
+
+		// a few candidates per slot; keep the one this character can use best
+		// (unmet attribute requirements make an item useless, as in play)
+		const roll = ( slot, tags ) => rollItem( s.level, { rarity, slot, tags }, rng ) || rollItem( s.level, { rarity, slot }, rng );
+		const value = () => {
+
+			const S = simulateStats( game );
+			return estimateAttack( S ).dps * Math.sqrt( Math.max( 1, S.get( 'life' ) ) );
+
+		};
+
+		for ( const slot of EQUIP_SLOTS ) {
+
+			let best = null, bestV = - Infinity;
+			for ( let i = 0; i < ( slot === 'weapon' ? 6 : 3 ); i ++ ) {
+
+				const item = slot === 'weapon' ? roll( 'weapon', [ 'one-hand', 'melee' ] ) : slot === 'offhand' ? roll( 'offhand', [ 'shield' ] ) : roll( slot.replace( /\d$/, '' ) );
+				s.equipment[ slot ] = item;
+				const v = value();
+				if ( v > bestV ) {
+
+					bestV = v; best = item;
+
+				}
+
+			}
+
+			s.equipment[ slot ] = best;
+
+		}
+
+		const flaskTags = [ 'life_flask', 'life_flask', 'mana_flask', 'utility_flask' ];
+		s.flasks.slots = flaskTags.map( ( tag, i ) => rollItem( s.level, { rarity: 'magic', flask: true, tags: [ tag ] }, rng ) ?? s.flasks.slots[ i ] ?? null );
+
+		const cap = maxSkillLevel( s.level );
+		for ( const id of s.skills.bar ) if ( id ) s.skills.levels[ id ] = cap;
+		game.applyPlayerStats();
+		const p = game.world?.player;
+		if ( p ) {
+
+			p.life = p.maxLife; p.mana = p.maxMana;
+
+		}
+
+		return { level: s.level, passives: Tree.treeState( s ).allocated.length - 1, skillLevel: cap, gear: EQUIP_SLOTS.map( ( k ) => s.equipment[ k ] && itemSummary( s.equipment[ k ] ) ) };
 
 	} } );
 define( 'apiCommand', { id: 'items.craft', desc: 'Apply a currency orb to an item location', args: { currency: 'currency id', loc: '{ where, index | slot | tab }' },

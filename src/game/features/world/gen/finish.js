@@ -3,7 +3,8 @@
 //
 //   1. room anchors (a walkable tile per room) + world-space centres
 //   2. theme terrain features: water pools, lava rivers, chasms, ice
-//   3. bridges wherever a feature cut the start from a room (always reachable)
+//   3. bridges wherever a feature cut the start from a room (always reachable);
+//      leftover floor pockets a pool or chasm cut off are sealed (no stranding)
 //   4. mechanic decorators ( mechanic.decorate( L, rng, ctx ) ): ice patches, spike
 //      grids, magma basins, pylons, rift pairs, wells, hives, vents ...
 //   5. walls hug the floor (outlineWalls), floor styles + ambient occlusion
@@ -57,6 +58,7 @@ export function finishLayout( L, spec, rng ) {
 	}
 
 	bridgeGaps( L, anchors );
+	sealPockets( L, anchors );
 	outlineWalls( L );
 	styleFloors( L, rng.fork( 'style' ), theme );
 	const wd = wallDistance( L );
@@ -224,6 +226,33 @@ export function bridgeGaps( L, anchors ) {
 		for ( const t of p ) if ( GAP( L.get( t.x, t.z ) ) ) L.set( t.x, t.z, TILE.BRIDGE );
 
 	}
+
+}
+
+// Floor the start cannot reach on foot (a pool clipped a room's corner) joins the
+// hazard next to it, else becomes wall: nothing spawns out of reach, and a leap
+// or blink can never strand the player somewhere with no way back.
+export function sealPockets( L, anchors ) {
+
+	const dist = bfs( L, [ anchors[ 0 ] ], walkable );
+	const pocket = ( x, z ) => L.inside( x, z ) && walkable( L.get( x, z ) ) && dist[ L.idx( x, z ) ] < 0;
+	// grow the neighbouring hazard into the pocket, then wall up whatever is left
+	for ( let pass = 0, changed = true; changed && pass < 64; pass ++ ) {
+
+		changed = false;
+		for ( let z = 0; z < L.h; z ++ ) for ( let x = 0; x < L.w; x ++ ) {
+
+			if ( ! pocket( x, z ) ) continue;
+			const n = [ L.get( x + 1, z ), L.get( x - 1, z ), L.get( x, z + 1 ), L.get( x, z - 1 ) ].find( GAP );
+			if ( n === undefined ) continue;
+			L.set( x, z, n );
+			changed = true;
+
+		}
+
+	}
+
+	for ( let z = 0; z < L.h; z ++ ) for ( let x = 0; x < L.w; x ++ ) if ( pocket( x, z ) ) L.set( x, z, TILE.WALL );
 
 }
 

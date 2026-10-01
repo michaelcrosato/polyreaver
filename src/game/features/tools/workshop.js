@@ -243,6 +243,7 @@ export function simDepth( game, depth, seconds ) {
 	g.save.level = Math.max( 1, depth * 2 - 1 );
 	g.applyPlayerStats();
 	const w = g.enterLevel( depth );
+	g.api( 'player.kit', { level: g.save.level } );
 	const bot = g.api( 'bot.create', {} );
 	let t = 0;
 	while ( t < seconds && w.player.alive && ! w.state.complete ) {

@@ -12,16 +12,23 @@
 //   3. fight: nearest threat (bosses and rares first when close), keep melee range,
 //      hold attack, fire bar skills when ready and affordable
 //   4. collect loot when the coast is clear
-//   5. head for the exit once it is open (or explore unvisited floor)
-// Navigation is A* over the tile grid with corner cutting disabled.
+//   5. head for the exit once it is open, else explore like a player reading the map:
+//      nearest unvisited room first, the boss room last (or first with { rush: true }),
+//      then hunt whatever is left so the exit opens
+// Navigation is A* over the tile grid with corner cutting disabled. Targets it cannot
+// reach, and goals it gets stuck on, are skipped for a while. Hidden (burrowed) and
+// inert entities are ignored. The bot has its own RNG: running it never changes the
+// world's random sequence.
 
 import { TEAM } from '../../core/tuning.js';
+import { RNG } from '../../core/rng.js';
 
-export function createBot( game, { skills = true, loot = true, explore = true } = {} ) {
+export function createBot( game, { skills = true, loot = true, explore = true, rush = false } = {} ) {
 
 	const w = () => game.world;
 	const inp = game.input;
-	const st = { path: null, pathTo: null, pathAt: - 9, visited: new Set(), dodges: 0, potions: 0, picked: 0, skillUses: 0, stuck: 0, lastPos: null, startTime: w().time, startXp: game.save.xp, startLevel: game.save.level, startGold: game.save.gold, exit: null, decisions: {} };
+	const st = { path: null, pathTo: null, pathAt: - 9, unreachable: false, visited: new Set(), rooms: new Set(), ignore: new Map(), rng: new RNG( 'bot' ), dodges: 0, potions: 0, picked: 0, skillUses: 0, stuck: 0, lastPos: null, lastPosAt: w().time, startTime: w().time, startXp: game.save.xp, startLevel: game.save.level, startGold: game.save.gold, exit: null, decisions: {} };
+	const ignored = ( key ) => ( st.ignore.get( key ) ?? - 1 ) > w().time;
 	const offExit = w().events.on( 'exitOpen', ( e ) => ( st.exit = { x: e.x, z: e.z } ) );
 	const count = ( k ) => ( st.decisions[ k ] = ( st.decisions[ k ] || 0 ) + 1 );
 
@@ -46,6 +53,7 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 				st.path = astar( L, p.x, p.z, x, z );
 				st.pathTo = { x, z };
 				st.pathAt = w().time;
+				st.unreachable = ! st.path;
 
 			}
 
@@ -56,7 +64,12 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 
 			}
 
-		} else st.path = null;
+		} else {
+
+			st.path = null;
+			st.unreachable = false;
+
+		}
 
 		const dx = tx - p.x, dz = tz - p.z, l = Math.hypot( dx, dz ) || 1;
 		inp.move.x = dx / l; inp.move.z = dz / l;
@@ -83,8 +96,25 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 		const world = w(), p = world.player;
 		inp.held.clear();
 		if ( ! p || ! p.alive ) return;
-		const tile = world.layout.toTile( p.x, p.z ).join( ',' );
-		st.visited.add( tile );
+		const L = world.layout, [ ptx, ptz ] = L.toTile( p.x, p.z );
+		st.visited.add( ptx + ',' + ptz );
+		for ( const r of L.rooms || [] ) if ( ptx >= r.x && ptz >= r.z && ptx < r.x + r.w && ptz < r.z + r.h ) st.rooms.add( r.id ?? L.rooms.indexOf( r ) );
+		// stuck: barely moved for 2 s while trying to -> skip the current target / goal
+		if ( world.time - st.lastPosAt > 2 ) {
+
+			const moved = st.lastPos ? Math.hypot( p.x - st.lastPos.x, p.z - st.lastPos.z ) : 9;
+			if ( moved < 0.6 && ( inp.move.x || inp.move.z ) && st.current ) {
+
+				st.ignore.set( st.current, world.time + 15 );
+				st.stuck ++;
+				count( 'stuck' );
+
+			}
+
+			st.lastPos = { x: p.x, z: p.z };
+			st.lastPosAt = world.time;
+
+		}
 
 		// 1. telegraphed danger: dodge away from its centre
 		const danger = threatAt( p.x, p.z );
@@ -109,7 +139,7 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 		}
 
 		// 3. fight
-		const foes = world.entities.filter( ( e ) => e.alive && e.team === TEAM.ENEMY && e.kind !== 'prop' && ! e.flags.untargetable );
+		const foes = world.entities.filter( ( e ) => e.alive && e.team === TEAM.ENEMY && e.kind !== 'prop' && ! e.flags.untargetable && ! e.flags.inert && ! e.data.hidden && ! ignored( e.id ) );
 		let target = null, best = Infinity;
 		for ( const f of foes ) {
 
@@ -125,6 +155,30 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 
 		}
 
+		// stick with the current target (out to 40 m) unless something is much closer:
+		// no flip-flopping between two goals at the edge of the 28 m sight range
+		const prev = st.target && foes.includes( st.target ) ? st.target : null;
+		if ( prev && prev !== target && p.distTo( prev ) < 40 && ( ! target || p.distTo( target ) > p.distTo( prev ) - 6 ) ) target = prev;
+		st.target = target;
+
+		// no progress (kill, damage, new room) for 20 s: give up on what we are doing
+		const progress = world.stats.kills * 1e6 + st.rooms.size * 1e4 + Math.floor( world.stats.damageDealt );
+		if ( progress !== st.progress ) {
+
+			st.progress = progress;
+			st.progressAt = world.time;
+
+		} else if ( world.time - ( st.progressAt ?? world.time ) > 20 && st.current ) {
+
+			st.ignore.set( st.current, world.time + 30 );
+			st.progressAt = world.time;
+			st.target = null;
+			count( 'stall' );
+			if ( target && st.current === target.id ) target = null;
+
+		}
+
+		st.current = target ? target.id : st.goal ? 'goal:' + st.goal.key : null;
 		if ( target && world.layout.hasLineOfSight( p.x, p.z, target.x, target.z ) ) {
 
 			count( 'fight' );
@@ -141,7 +195,7 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 
 			if ( skills && p.mana > p.maxMana * 0.3 && world.frame % 20 === 0 ) {
 
-				const slot = 'skill' + ( 1 + ( Math.floor( world.time * 0.7 ) % 6 ) );
+				const slot = 'skill' + ( 1 + ( Math.floor( world.time * 0.7 ) % 5 ) ); // bar slots 2-6 (slot 1 is 'attack')
 				inp.held.add( slot );
 				inp.pressed.add( slot );
 				st.skillUses ++;
@@ -156,6 +210,7 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 
 			count( 'chase' );
 			moveToward( target.x, target.z, 1.5 );
+			if ( st.unreachable ) st.ignore.set( target.id, world.time + 15 );
 			return;
 
 		}
@@ -163,11 +218,14 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 		// 4. loot
 		if ( loot ) {
 
-			const item = world.spatial.nearest( p.x, p.z, 14, ( e ) => e.kind === 'loot' && ! e.data.picked );
+			const item = world.spatial.nearest( p.x, p.z, 14, ( e ) => e.kind === 'loot' && ! e.data.picked && ! ignored( 'loot:' + e.id ) );
 			if ( item ) {
 
 				count( 'loot' );
-				if ( moveToward( item.x, item.z, 0.6 ) ) {
+				st.current = 'loot:' + item.id;
+				const there = moveToward( item.x, item.z, 0.6 );
+				if ( st.unreachable ) item.data.picked = true; // can't get there: leave it
+				if ( there ) {
 
 					inp.pressed.add( 'interact' );
 					st.picked ++;
@@ -194,14 +252,21 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 		if ( explore ) {
 
 			count( 'explore' );
-			if ( ! st.goal || st.visited.has( st.goal.key ) || world.time - st.goalAt > 12 ) {
+			const done = st.goal && ( st.goal.room ? st.rooms.has( st.goal.key ) : st.visited.has( st.goal.key ) );
+			if ( ! st.goal || done || ignored( 'goal:' + st.goal.key ) || world.time - st.goalAt > 30 ) {
 
-				st.goal = farthestUnvisited( world.layout, p, st.visited, world.rng );
+				st.goal = nextRoom( L, p, st, rush, ignored ) || huntGoal( p, foes ) || farthestUnvisited( L, p, st.visited, st.rng );
 				st.goalAt = world.time;
 
 			}
 
-			if ( st.goal ) moveToward( st.goal.x, st.goal.z, 1 );
+			if ( st.goal && ( moveToward( st.goal.x, st.goal.z, 1 ) || st.unreachable ) ) {
+
+				if ( st.goal.room ) st.rooms.add( st.goal.key ); else st.visited.add( st.goal.key );
+				if ( st.unreachable ) st.ignore.set( 'goal:' + st.goal.key, world.time + 60 );
+				st.goal = null;
+
+			}
 
 		}
 
@@ -223,8 +288,8 @@ export function createBot( game, { skills = true, loot = true, explore = true } 
 				kills: s.kills, deaths: s.deaths, dps: Math.round( s.damageDealt / Math.max( 1, t ) ), damageTaken: Math.round( s.damageTaken ),
 				levelsGained: game.save.level - st.startLevel, gold: game.save.gold - st.startGold,
 				dodges: st.dodges, potions: st.potions, pickups: st.picked, skillUses: st.skillUses,
-				enemiesLeft: world.entities.filter( ( e ) => e.alive && e.team === TEAM.ENEMY ).length,
-				explored: st.visited.size, decisions: st.decisions
+				enemiesLeft: world.entities.filter( ( e ) => e.alive && e.team === TEAM.ENEMY && e.kind !== 'prop' ).length,
+				explored: st.visited.size, rooms: `${st.rooms.size}/${world.layout.rooms?.length ?? 0}`, stuck: st.stuck, decisions: st.decisions
 			};
 
 		}
@@ -295,6 +360,49 @@ export function astar( L, x0, z0, x1, z1, maxNodes = 20000 ) {
 	}
 
 	return null;
+
+}
+
+// Nearest room not yet entered; the boss room waits until every other room is done
+// (rushers go there first). Rooms are { id, x, z, w, h (tiles), cx, cz (metres), kind }.
+function nextRoom( L, p, st, rush, ignored ) {
+
+	let best = null, bd = Infinity;
+	for ( const r of L.rooms || [] ) {
+
+		const key = r.id ?? L.rooms.indexOf( r );
+		if ( st.rooms.has( key ) || ignored( 'goal:' + key ) || r.cx === undefined ) continue;
+		const d = Math.hypot( r.cx - p.x, r.cz - p.z ) + ( r.kind === 'boss' ? ( rush ? - 1e4 : 1e4 ) : 0 );
+		if ( d < bd ) {
+
+			bd = d;
+			best = { x: r.cx, z: r.cz, key, room: true };
+
+		}
+
+	}
+
+	return best;
+
+}
+
+// Every room seen and the exit still shut: walk to the nearest monster left.
+function huntGoal( p, foes ) {
+
+	let best = null, bd = Infinity;
+	for ( const f of foes ) {
+
+		const d = p.distTo( f );
+		if ( d < bd ) {
+
+			bd = d;
+			best = { x: f.x, z: f.z, key: 'hunt' + f.id };
+
+		}
+
+	}
+
+	return best;
 
 }
 
