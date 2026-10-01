@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "smoke": "node scripts/smoke.mjs",
-    "smoke:quick": "node scripts/smoke.mjs --quick"
+    "smoke:quick": "node scripts/smoke.mjs --quick",
+    "build:game": "vite build --config vite.game.config.js && node scripts/postbuild-game.mjs",
+    "sim": "node scripts/sim.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
