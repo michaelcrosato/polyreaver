@@ -13,7 +13,7 @@ import {
 	sampleBlended, channels, poseVertexDynamic, proceduralVertex, skinVertex, bakeVAT, sampleVAT, rotY
 } from './anim.js';
 import { TAU, hashF } from './sim.js';
-import { ensureLodBuffers } from './cull.js';
+import { ensureLodBuffers, ensureCasters, SHADOW_LAYER } from './cull.js';
 
 // three.js derives the "previous frame" vertex position (velocity buffer for motion
 // blur / TRAA) from the raw geometry, which ignores positionNode. Our agents are
@@ -231,13 +231,37 @@ export function rebuildMeshes( crowd ) {
 			const anim = crowd.lodAnimBufs[ k ].toAttribute();
 			const geo = crowd.lodGeos[ k ];
 			const main = addMesh( geo, makeMaterial( crowd, inst, anim, k ), { kind: 'crowd', tier: k } );
-			main.castShadow = crowd.castShadow;
+			main.castShadow = false; // the sun-culled caster meshes below cast instead
 			main.receiveShadow = crowd.receiveShadow;
 			main.count = 2; // real count comes from the indirect buffer
+			// With VSM, three.js also draws shadow RECEIVERS into the shadow map. These
+			// agents are already in the caster lists, so collapse them to one point there:
+			// a trivial vertex shader and no triangles instead of a second full draw.
+			if ( crowd.castShadow ) main.material.castShadowPositionNode = vec3( 0, - 1e4, 0 );
 			if ( crowd.outlines ) {
 
 				const o = addMesh( geo, makeMaterial( crowd, inst, anim, k, { hull: true } ), { kind: 'outline', tier: k } );
 				o.count = 2;
+
+			}
+
+		}
+
+		// Shadow casters: the same models and vertex shader, fed from the lists culled
+		// against the sun (cull.js), on a layer that only the shadow camera renders.
+		// The shadow pass only uses a material's position (and alpha), so plain Basic.
+		if ( crowd.castShadow ) {
+
+			ensureCasters( crowd );
+			for ( let k = 0; k <= crowd.tier; k ++ ) {
+
+				const mat = new THREE.MeshBasicNodeMaterial();
+				mat.positionNode = vertexNode( crowd, crowd.casterBufs[ k ].toAttribute(), crowd.casterAnimBufs[ k ].toAttribute(), k );
+				mat.name = 'CrowdShadowCaster';
+				const caster = addMesh( crowd.casterGeos[ k ], mat, { kind: 'caster', tier: k } );
+				caster.castShadow = true;
+				caster.layers.set( SHADOW_LAYER );
+				caster.count = 2;
 
 			}
 

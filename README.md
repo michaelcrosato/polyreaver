@@ -204,7 +204,7 @@ shaders, so expect a one-off hitch).
 | Ambient (hemisphere light) | on | ●○○○ cheap | fill | Sky/ground colour fill so shadowed sides are not pitch black. One cheap light term. Only matters with a lit shading model. |
 | Environment map (IBL) | off | ●●○○ moderate | fill / bandwidth | Image-based lighting from a pre-filtered (PMREM) cube map: soft ambient + reflections for Standard/Physical materials. Costs texture samples per pixel. **Mobile:** Fine on phones; the pre-filtering happens once at startup. |
 | Sun shadows | Off | ●●●○ heavy | vertex / fill | Shadow mapping renders the scene a second time from the sun into a depth texture, then every lit pixel samples it. With the crowd casting, the vertex work DOUBLES: every agent is drawn twice. Bigger maps and soft filters add fill and sampling cost. **Mobile:** Real-time shadows for thousands of characters are one of the most expensive things you can turn on for a phone. Use blob shadows instead, or only let nearby agents cast. |
-| Crowd casts shadows | on | ●●●○ heavy | vertex | When off, only the props cast shadows and the crowd only receives them - the shadow pass no longer re-draws every agent. |
+| Crowd casts shadows | on | ●●●○ heavy | vertex | When off, only the props cast shadows and the crowd only receives them - the shadow pass no longer re-draws every agent. GPU-driven mode culls the casters separately against the sun, so agents just off screen still cast into view and agents whose shadow cannot be seen are skipped. Casters keep the LOD the camera picked, so each shadow matches its body. The caster lists add 32 bytes per agent for each model tier in use. |
 | Blob shadows (fake) | off | ●○○○ cheap | fill | A soft dark quad under each agent: 2 triangles and a little alpha blending. The classic cheap crowd shadow (used by nearly every game with big crowds). **Mobile:** Almost free - the best value visual upgrade on this list. |
 | Point lights (street lamps) | None | ●●●○ heavy | fill / compile | Forward rendering loops over EVERY light for EVERY pixel of every lit material, and the light count is baked into the shader (changing it recompiles). 64+ lights in forward mode gets very slow. |
 | Clustered (Forward+) lighting | off | ●●○○ moderate | compute / fill | A compute pass bins lights into screen tiles x depth slices; each pixel only evaluates the lights touching its cluster. Makes 100s of lights affordable. **Mobile:** Needs compute + storage buffers in the fragment stage; supported on most WebGPU phones. |
@@ -326,7 +326,7 @@ src/app/                config + key groups, settings appliers, hero, HUD/report
 src/gpu.js              WebGPU device creation (real hardware limits, no fallback)
 src/crowd/crowd.js      Crowd class: lifecycle, settings, per-frame compute order, stats
 src/crowd/sim.js        compute kernels: init, simulation/AI, skeletal bones, physics proxies
-src/crowd/cull.js       GPU-driven path: frustum + screen-size LOD cull, indirect draws
+src/crowd/cull.js       GPU-driven path: frustum + screen-size LOD cull, indirect draws, sun-culled shadow casters
 src/crowd/materials.js  crowd vertex shader per animation system, materials, meshes
 src/crowd/anim.js       the five animation systems (procedural, keyframe, skeletal, VAT)
 src/crowd/clips.js      hand-keyed animation clips + CPU pose chain (VAT baking)
@@ -356,8 +356,16 @@ scripts/                post-build copy, README table generator, smoke test
   (rotations locked) and are kept on the ground plane.
 * The two-way proxies and Rapier crowd depend on an asynchronous GPU→CPU readback, so Rapier
   sees people positions one or two frames late.
-* In the GPU-driven path, culling uses the main camera, so agents just outside the view don't cast
-  shadows into it.
+* In the GPU-driven path, shadow casters get their own compute cull. It keeps agents inside the sun's
+  shadow camera whose shadow can reach the view: the camera frustum with each plane pushed back toward
+  the sun. Kept agents go into separate per-LOD lists, drawn by caster-only meshes on a layer that only
+  the shadow camera renders (r186's shadow pass uses `shadow.camera.layers` as-is once it has a bit
+  besides layer 0). Agents just off screen still cast into view, and agents whose shadows land off
+  screen are skipped. Casters use the LOD the main camera picks, so an on-screen agent's caster is
+  exactly the model drawn and its self-shadowing is right. This costs one or two extra cull passes and
+  32 bytes per agent of capacity for each model tier in use, allocated the first time the crowd casts
+  (the HUD shows `casting` and the list memory). With VSM, three.js also draws shadow *receivers* into
+  the map, so the on-screen meshes are collapsed to a point in that pass instead of being drawn twice.
 * r186 details handled here: `PCFSoftShadowMap` was folded into `PCFShadowMap` (+ radius), and
   `PassNode.getViewZNode()` assumes a perspective camera, so depth of field computes an
   orthographic view-Z itself for the isometric camera.

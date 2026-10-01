@@ -58,7 +58,7 @@ export function updateHud( app ) {
 	const s = app.stats, S = app.S, g = app.gpu;
 	const cs = app.crowd.stats();
 	const shadowsOn = S.shadows !== 'off';
-	const castTris = shadowsOn && S.crowdShadows ? cs.instances * app.crowd.models[ S.tier ].triangles : 0;
+	const castTris = cs.shadowTris; // the crowd as drawn into the sun's shadow map
 	const propTris = app.world.propTriangles * ( shadowsOn ? 2 : 1 );
 	const physTris = app.physics.triangles * ( shadowsOn ? 2 : 1 );
 	const tris = cs.tris + castTris + propTris + physTris;
@@ -69,7 +69,8 @@ export function updateHud( app ) {
 	const gpuLine = g.timestamps
 		? `GPU <b>${( s.gpuRender + s.gpuCompute ).toFixed( 2 )}</b> ms <span class="dim">(render ${s.gpuRender.toFixed( 2 )} + compute ${s.gpuCompute.toFixed( 2 )})</span>`
 		: '<span class="dim">GPU timing unavailable (no timestamp-query)</span>';
-	const vis = S.path === 'gpu' ? ` · visible <b>${formatCount( cs.instances )}</b> <span class="dim">[${cs.visibleByTier.slice( 0, Number( S.tier ) + 1 ).map( formatCount ).join( '/' )}]</span>` : '';
+	const vis = S.path === 'gpu' ? ` · visible <b>${formatCount( cs.instances )}</b> <span class="dim">[${cs.visibleByTier.slice( 0, Number( S.tier ) + 1 ).map( formatCount ).join( '/' )}]</span>` +
+		( cs.shadowDraws ? ` · casting <b>${formatCount( cs.casters )}</b>` : '' ) : '';
 	let phys = '';
 	if ( app.physics.enabled && app.physics.ready ) {
 
@@ -93,6 +94,6 @@ export function updateHud( app ) {
 		`<div class="x">draw calls <b>${info.render.drawCalls}</b> · passes ${app.post.active ? app.post.passes : 1}${shadowsOn ? ' + shadow' : ''}</div>` +
 		`<div class="dim x">${w}×${hgt} px (${app.pixelRatio.toFixed( 2 )}x)</div>` +
 		animLine + phys +
-		`<div class="dim more">${describeAdapter( g.info )}<br>feature level ${g.featureLevel} · three r${THREE.REVISION} · capacity ${formatCount( app.crowd.capacity )}</div>` );
+		`<div class="dim more">${describeAdapter( g.info )}<br>feature level ${g.featureLevel} · three r${THREE.REVISION} · capacity ${formatCount( app.crowd.capacity )}${S.path === 'gpu' ? ` · cull lists ${( cs.cullBytes / 1048576 ).toFixed( 0 )} MB` : ''}</div>` );
 
 }

@@ -26,6 +26,7 @@ export function applyCrowd( app ) {
 	u.speedScale.value = S.speed;
 	u.behaviour.value = Number( S.behaviour );
 	const shadowsOn = S.shadows !== 'off';
+	crowd.shadowLight = app.world.sun; // replaced when the shadow mode changes (applyShading runs first)
 	crowd.set( {
 		tier: Number( S.tier ), path: S.path, animSystem: S.anim, animBlend: S.animBlend, outlines: S.outlines, rim: S.rim,
 		blobShadows: S.blobShadows, lodEnabled: S.lod, materialKind: S.shading,
