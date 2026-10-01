@@ -34,6 +34,7 @@ const scenarios = [ { name: 'baseline', set: {} } ];
 const options = ( key ) => findItem( key ).options.map( ( o ) => o[ 0 ] );
 if ( quick ) {
 
+	scenarios.push( { name: 'benchmark ballast', set: {}, js: 'app.bench.ballast.set( 4096 )', frames: 4 }, { name: 'ballast off', keep: true, js: 'app.bench.ballast.set( 0 )' } );
 	scenarios.push( { name: 'preset ultra', preset: 'ultra' }, { name: 'anim skeletal gpu', set: { anim: 'skeletal', path: 'gpu' } }, { name: 'physics', set: { physics: true }, frames: 30 } );
 
 } else {
@@ -43,6 +44,8 @@ if ( quick ) {
 	for ( const stylize of options( 'stylize' ) ) scenarios.push( { name: 'stylize ' + stylize, set: { stylize } } );
 	for ( const tier of [ 0, 1, 2, 3 ] ) scenarios.push( { name: 'tier ' + tier, set: { tier, outlines: true } } );
 	scenarios.push(
+		{ name: 'benchmark ballast', set: {}, js: 'app.bench.ballast.set( 4096 )', frames: 4 },
+		{ name: 'ballast off', keep: true, js: 'app.bench.ballast.set( 0 )' },
 		{ name: 'physics', set: { physics: true }, frames: 40 },
 		{ name: 'physics explode', keep: true, action: 'explode', frames: 20 },
 		{ name: 'physics wrecking ball', keep: true, action: 'wrecking', frames: 20 },
@@ -145,6 +148,7 @@ for ( const [ i, sc ] of scenarios.entries() ) {
 			else if ( s.keep ) app.applyAll( { ...app.S, ...( s.set || {} ) } );
 			else app.applyAll( { ...JSON.parse( b ), ...( s.set || {} ) } );
 			if ( s.action ) app.action( s.action );
+			if ( s.js ) new Function( 'app', s.js )( app );
 
 		}, [ base, sc ] );
 		const start = await page.evaluate( () => window.app.frameCount );

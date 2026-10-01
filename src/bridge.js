@@ -299,7 +299,7 @@ export class ClaudeLink {
 		await this.app.bench.measureEffects();
 		const r = this.app.bench.results.fx;
 		if ( ! r ) throw new Error( 'effects run was stopped' );
-		return { rows: r.map( ( row ) => ( { label: row.label, fps: round( row.fps, 1 ), frameDelta: round( row.frameDelta ), gpuDelta: round( row.gpuDelta ) } ) ) };
+		return { warmLoadMs: round( this.app.bench.warmLoad ), rows: r.map( ( row ) => ( { label: row.label, fps: round( row.fps, 1 ), frameDelta: round( row.frameDelta ), gpuDelta: round( row.gpuDelta ) } ) ) };
 
 	}
 

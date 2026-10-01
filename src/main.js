@@ -95,17 +95,18 @@ class App {
 	resolveCapacity() {
 
 		const S = this.S;
-		const maxBinding = this.gpu.limits.maxStorageBufferBindingSize || 134217728;
-		const hardMax = Math.min( 4194304, Math.floor( maxBinding / 16 ) );
+		const hardMax = this.hardMaxCapacity;
 		let cap = S.capacity === 'auto' ? ( IS_MOBILE ? 262144 : 1048576 ) : Number( S.capacity );
 		while ( cap < S.count && cap < hardMax ) cap = CAPACITIES.find( ( c ) => c > cap ) || hardMax;
 		return Math.min( cap, hardMax );
 
 	}
 
-	get maxCapacity() {
+	// Largest crowd buffer this GPU allows (one vec4 per agent in one storage binding).
+	get hardMaxCapacity() {
 
-		return this.crowd.capacity;
+		const maxBinding = this.gpu.limits.maxStorageBufferBindingSize || 134217728;
+		return Math.min( 4194304, Math.floor( maxBinding / 16 ) );
 
 	}
 
@@ -357,6 +358,7 @@ class App {
 		this.post.u.focus.value = focus;
 		this.post.u.focalLength.value = this.rig.isOrtho ? this.rig.viewHeight * 0.3 : Math.max( 3, focus * 0.5 );
 
+		this.bench.ballast.update(); // benchmark-only dummy GPU load, normally off
 		if ( this.post.active ) this.post.render();
 		else this.renderer.render( this.scene, cam );
 		this.link.afterRender();
@@ -373,7 +375,7 @@ class App {
 		this.frameCount ++;
 		const s = this.stats;
 		const gpuMs = this.gpu.timestamps ? ( this.renderer.info.render.timestamp || 0 ) + ( this.renderer.info.compute.timestamp || 0 ) : 0;
-		this.bench.onFrame( frameMs, gpuMs );
+		this.bench.onFrame( frameMs, gpuMs, cpuMs );
 		this.graph.push( frameMs, gpuMs );
 		s.frames ++;
 		s.acc += frameMs;

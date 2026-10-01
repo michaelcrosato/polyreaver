@@ -6,6 +6,7 @@
 // capped by vsync and therefore a better measure of an effect's own cost.
 
 import { formatCount } from './features.js';
+import { Ballast } from './ballast.js';
 
 const median = ( arr ) => {
 
@@ -69,15 +70,19 @@ export class Bench {
 		this.running = false;
 		this.samples = [];
 		this.gpuSamples = [];
+		this.cpuSamples = [];
 		this.results = { crowd: null, fx: null };
 		this.onResult = null; // ( kind, data ) => {} - set by the Claude link
+		this.ballast = new Ballast( app.renderer );
+		this.warmLoad = 0; // GPU ms of the current ballast + scene, for the report
 
 	}
 
-	onFrame( frameMs, gpuMs ) {
+	onFrame( frameMs, gpuMs, cpuMs = 0 ) {
 
 		if ( ! this.running || ! this._collect ) return;
 		this.samples.push( frameMs );
+		this.cpuSamples.push( cpuMs );
 		if ( gpuMs > 0 ) this.gpuSamples.push( gpuMs );
 
 	}
@@ -97,6 +102,7 @@ export class Bench {
 		await this._waitFrames( 4, warmupMs );
 		this.samples = [];
 		this.gpuSamples = [];
+		this.cpuSamples = [];
 		this._collect = true;
 		const t0 = performance.now();
 		while ( ( performance.now() - t0 < sampleMs || this.samples.length < minFrames ) && performance.now() - t0 < 20000 ) {
@@ -108,7 +114,7 @@ export class Bench {
 
 		this._collect = false;
 		const frame = median( this.samples ) || 1000;
-		return { frame, fps: 1000 / frame, gpu: median( this.gpuSamples ), n: this.samples.length };
+		return { frame, fps: 1000 / frame, gpu: median( this.gpuSamples ), cpu: median( this.cpuSamples ), n: this.samples.length };
 
 	}
 
@@ -159,25 +165,32 @@ export class Bench {
 		const app = this.app;
 		const original = app.S.count;
 		const budget = 1000 / targetFps;
+		const maxN = app.hardMaxCapacity;
 		const log = [];
-		const out = ( extra = '' ) => app.ui.setBenchOutput( `<b>Max crowd @ ${targetFps} fps</b><br>${log.join( '<br>' )}${extra}` );
-
-		// A frame counts as "on target" within 8 % tolerance (rAF jitter).
-		const ok = ( m ) => m.frame <= budget * 1.08;
+		// The display caps the frame rate (vsync), so on a fast GPU every crowd size
+		// "holds 60 fps" and the frame time says nothing. With GPU timestamps we judge
+		// the work itself: GPU and CPU time must both fit in 90 % of the frame budget,
+		// which also allows targets above the monitor's refresh rate.
+		const byWork = !! app.gpu.timestamps;
+		const ok = byWork
+			? ( m ) => m.gpu > 0 && Math.max( m.gpu, m.cpu ) <= budget * 0.9
+			// without timestamps: a frame counts as "on target" within 8 % (rAF jitter)
+			: ( m ) => m.frame <= budget * 1.08;
+		const out = ( extra = '' ) => app.ui.setBenchOutput( `<b>Max crowd @ ${targetFps} fps</b> <span class="dim">(judged by ${byWork ? 'GPU/CPU time' : 'frame time'})</span><br>${log.join( '<br>' )}${extra}` );
 		let good = 0, bad = 0, n = Math.max( 1000, Math.min( original, 5000 ) );
 		try {
 
 			while ( true ) {
 
-				n = Math.min( n, app.maxCapacity );
+				n = Math.min( n, maxN );
 				app.set( 'count', n );
 				out( `<br>testing ${formatCount( n )}…` );
 				const m = await this._measure();
-				log.push( `${formatCount( n )} agents: ${m.fps.toFixed( 1 )} fps (${m.frame.toFixed( 1 )} ms${m.gpu ? `, GPU ${m.gpu.toFixed( 1 )} ms` : ''})` );
+				log.push( `${formatCount( n )} agents: ${m.fps.toFixed( 1 )} fps (frame ${m.frame.toFixed( 1 )} ms${m.gpu ? `, GPU ${m.gpu.toFixed( 1 )} ms` : ''}, CPU ${m.cpu.toFixed( 1 )} ms)` );
 				if ( ok( m ) ) {
 
 					good = n;
-					if ( n >= app.maxCapacity ) break;
+					if ( n >= maxN ) break;
 					n = Math.round( n * 1.6 );
 
 				} else {
@@ -196,16 +209,16 @@ export class Bench {
 				app.set( 'count', mid );
 				out( `<br>refining ${formatCount( mid )}…` );
 				const m = await this._measure();
-				log.push( `${formatCount( mid )} agents: ${m.fps.toFixed( 1 )} fps` );
+				log.push( `${formatCount( mid )} agents: ${m.fps.toFixed( 1 )} fps${m.gpu ? ` (GPU ${m.gpu.toFixed( 1 )} ms)` : ''}` );
 				if ( ok( m ) ) good = mid; else bad = mid;
 
 			}
 
 			const tris = good * app.crowd.models[ app.S.tier ].triangles;
-			this.results.crowd = { targetFps, maxAgents: good, trianglesPerFrame: tris, model: app.crowd.models[ app.S.tier ].id, path: app.S.path, log: log.slice() };
+			this.results.crowd = { targetFps, maxAgents: good, trianglesPerFrame: tris, model: app.crowd.models[ app.S.tier ].id, path: app.S.path, judgedBy: byWork ? 'gpu+cpu time' : 'frame time', hitCapacity: good >= maxN, log: log.slice() };
 			this.onResult?.( 'maxCrowd', this.results.crowd );
 			app.set( 'count', good || original );
-			out( `<br><b>Result: ${formatCount( good )} agents</b> (~${formatCount( tris )} crowd triangles) hold ${targetFps} fps${good >= app.maxCapacity ? ' (hit the buffer capacity - raise "Max crowd")' : ''}.` );
+			out( `<br><b>Result: ${formatCount( good )} agents</b> (~${formatCount( tris )} crowd triangles) hold ${targetFps} fps${good >= maxN ? ' - that is the largest crowd buffer this GPU allows, so the real limit is higher (try a heavier model or a higher fps target)' : ''}.` );
 
 		} catch {
 
@@ -215,6 +228,29 @@ export class Bench {
 		}
 
 		this.running = false;
+
+	}
+
+	// Keep the GPU at full clock speed for the effect benchmark: if the scene alone
+	// uses less than ~35 % of the frame, add ballast (doubling it) until it uses
+	// ~40 %. Needs GPU timestamps; without them frame times are all we have.
+	async _warmUp( report ) {
+
+		this.warmLoad = 0;
+		if ( ! this.app.gpu.timestamps ) return;
+		let m = await this._measure( 300, 600 );
+		const budget = m.frame;
+		if ( m.gpu >= budget * 0.35 ) return;
+		for ( let it = 2048; it <= 16777216; it *= 2 ) {
+
+			this.ballast.set( it );
+			report( `<br>warming up the GPU (ballast ${formatCount( it )} iterations, GPU ${m.gpu.toFixed( 1 )} ms)…` );
+			m = await this._measure( 300, 500 );
+			if ( m.gpu >= budget * 0.4 ) break;
+
+		}
+
+		this.warmLoad = m.gpu;
 
 	}
 
@@ -229,7 +265,8 @@ export class Bench {
 
 			const useGpu = rows.some( ( r ) => r.gpuDelta !== null );
 			const sorted = [ ...rows ].sort( ( a, b ) => ( b.gpuDelta ?? b.frameDelta ) - ( a.gpuDelta ?? a.frameDelta ) );
-			app.ui.setBenchOutput( `<b>Effect cost on top of current settings</b> (${formatCount( app.S.count )} agents)<br>` +
+			app.ui.setBenchOutput( `<b>Effect cost on top of current settings</b> (${formatCount( app.S.count )} agents)` +
+				( this.ballast.active ? ` <span class="dim">· GPU kept busy at ${this.warmLoad.toFixed( 1 )} ms for stable clocks</span>` : '' ) + '<br>' +
 				`<table><tr><th>Effect</th><th>${useGpu ? 'GPU +ms' : 'frame +ms'}</th><th>fps</th></tr>` +
 				sorted.map( ( r ) => `<tr><td>${r.label}</td><td>${fmtDelta( useGpu ? r.gpuDelta : r.frameDelta )}</td><td>${r.fps.toFixed( 0 )}</td></tr>` ).join( '' ) +
 				'</table>' + extra );
@@ -240,6 +277,7 @@ export class Bench {
 
 		try {
 
+			await this._warmUp( render );
 			for ( const test of FX_TESTS ) {
 
 				// skip tests that are already on
@@ -261,8 +299,8 @@ export class Bench {
 			}
 
 			this.results.fx = rows.map( ( r ) => ( { ...r } ) );
-			this.onResult?.( 'effects', { agents: app.S.count, rows: this.results.fx } );
-			render( '<br>done. Deltas are noisy on vsync-limited frames; GPU timestamps (when available) are more reliable.' );
+			this.onResult?.( 'effects', { agents: app.S.count, warmLoadMs: this.ballast.active ? this.warmLoad : 0, rows: this.results.fx } );
+			render( app.gpu.timestamps ? '<br>done.' : '<br>done. No GPU timestamps on this device, so these are frame-time deltas: anything under the vsync limit shows as ~0.' );
 
 		} catch {
 
@@ -270,6 +308,7 @@ export class Bench {
 
 		}
 
+		this.ballast.set( 0 );
 		app.applyAll( original );
 		this.running = false;
 
