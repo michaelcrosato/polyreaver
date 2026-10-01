@@ -258,8 +258,13 @@ Polyreaver is one game, but the pieces are not tied to it:
 - **Perspective.** The combat camera already has isometric, over-the-shoulder (pointer lock)
   and top-down views (V key, `combat.camera`). A twin-stick shooter is the top view plus
   projectile skills.
-- **Horde survival.** Use `makeArena`, a `worldHook` that spawns waves with
-  `spawnMonster( world, { family, level, rarity } )` on a timer, and the existing loot hook.
+- **Horde survival** is implemented as the worked example:
+  - `features/examples/horde.js` (about 130 lines): a level spec with `mode: 'horde'`, a
+    `worldHook` that makes the monster director stand down, a wave-director `system`, and
+    the `mode.horde` command;
+  - `features/examples/client.js`: a pause-menu panel to start it.
+
+  It changes nothing in the other features. Copy it to start a new mode.
 - **Hordes of thousands.** The Swarm mechanic (data-oriented arrays plus a flow field) and
   the GPU crowd (`src/crowd`) scale to thousands of agents. Use them for RTS-style crowds or
   ambient life (the town's townsfolk are the crowd engine).

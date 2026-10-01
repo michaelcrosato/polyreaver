@@ -9,5 +9,6 @@ import './features/monsters/sim.js';
 import './features/progression/sim.js';
 import './features/world/sim.js';
 import './features/tools/sim.js';
+import './features/examples/sim.js';
 
 export { Game } from './game.js';

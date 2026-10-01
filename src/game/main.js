@@ -16,6 +16,7 @@ import './features/monsters/client.js';
 import './features/progression/client.js';
 import './features/world/client.js';
 import './features/tools/client.js';
+import './features/examples/client.js';
 import { Game } from './game.js';
 import { RenderContext } from './render/context.js';
 import { UI } from './ui/shell.js';

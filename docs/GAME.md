@@ -49,6 +49,7 @@ and list them in your report):
 | progression | `features/progression` | XP rewards, items/affixes/rarities/uniques/currency, loot drops & pickup, inventory/equipment/stash/vendor/crafting, passive tree (+UI), skills & supports UI/loadout, flasks, save fields |
 | world | `features/world` | level layout generators, themes (palette, props, lighting, fog), level mechanics, campaign + endless level provider, town hub + NPC placement/services, level renderer, minimap, waypoint |
 | tools | `features/tools` | agent API, playtest bot, inspector, Workshop (lab worlds, loot roller, balance table), Claude link game commands |
+| examples | `features/examples` | small complete game modes built only from the registry (Horde: wave survival, `mode.horde`) — templates for new modes |
 
 ## 2. The registry (design language)
 
@@ -235,7 +236,10 @@ exploit it (chain reactions, crowd control, speed tech).
 | 21+ | **endless** | procedural | combine 1–3 mechanics × theme × palette × monster families × boss composition; names generated from the mechanics |
 
 Level spec: `{ id, depth, name, level (area level), theme, mechanics: [ids], generator, families: [ids], boss, seed, rules? }`.
-Generation always leaves every room reachable on foot from the start (bridges over gaps; floor pockets a pool cut off are
+Optional spec fields for game modes: `mode` (e.g. `'horde'`), `record` (key for clears / best times instead of the depth),
+`progress: false` (finishing does not unlock the next depth); a mode that runs its own encounters sets
+`world.state.populated = true` before order 90 (the director stands down) and `world.state.flow.hold = true` (no
+"cleared" exit fallback). Generation always leaves every room reachable on foot from the start (bridges over gaps; floor pockets a pool cut off are
 sealed), so neither a leap nor a spawn can strand anything.
 
 **Balance baseline** (`npm run sim`, the bot with `player.kit` at character level 2×depth−1): every campaign depth 1–20

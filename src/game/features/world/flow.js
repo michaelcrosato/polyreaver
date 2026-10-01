@@ -9,7 +9,8 @@
 //             spawns the exit portal. Fallbacks so a level can always be finished:
 //               - a boss died but nobody opened the exit within 2.5 s -> open it there
 //               - no boss ever appeared, the boss room was visited and no monster is
-//                 left alive -> open it at the boss room ("cleared")
+//                 left alive -> open it at the boss room ("cleared"); a game mode that
+//                 runs its own encounters sets world.state.flow.hold = true to skip this
 //   COMPLETE  walking into the portal calls game.completeLevel(), sets
 //             world.state.complete = true and emits 'levelExit' { depth, time } - the
 //             client then offers "next depth" / "town". Best clear times per depth are
@@ -99,7 +100,7 @@ define( 'system', { id: 'world:flow', order: 96, update( world ) {
 		}
 
 		if ( flow.bossDeadAt !== null && world.time - flow.bossDeadAt > 2.5 ) openExit( world, flow.bossPos.x, flow.bossPos.z );
-		else if ( ! flow.bossSeen && ( flow.visitedBoss || ! bossRoom ) && world.time > 4 && world.frame % 30 === 0 ) {
+		else if ( ! flow.bossSeen && ! flow.hold && ( flow.visitedBoss || ! bossRoom ) && world.time > 4 && world.frame % 30 === 0 ) {
 
 			const left = world.entities.some( ( e ) => e.alive && e.team === TEAM.ENEMY && ( e.kind === 'monster' || e.kind === 'boss' ) );
 			if ( ! left ) openExit( world, bossRoom ? bossRoom.cx : L.exit?.x ?? p.x, bossRoom ? bossRoom.cz : L.exit?.z ?? p.z );
@@ -180,12 +181,15 @@ export function completeLevel( world ) {
 	const time = world.time - ( world.state.flow?.start ?? 0 );
 	if ( game ) {
 
+		// spec.record: key for clears / best times (game modes keep their own);
+		// spec.progress === false: finishing it does not unlock the next depth
+		const key = world.spec?.record ?? depth;
 		const w = game.save.world || ( game.save.world = { best: {}, clears: {} } );
-		w.clears[ depth ] = ( w.clears[ depth ] ?? 0 ) + 1;
-		const best = w.best[ depth ];
+		w.clears[ key ] = ( w.clears[ key ] ?? 0 ) + 1;
+		const best = w.best[ key ];
 		w.newBest = ! best || time < best;
-		if ( w.newBest ) w.best[ depth ] = +time.toFixed( 2 );
-		game.completeLevel();
+		if ( w.newBest ) w.best[ key ] = +time.toFixed( 2 );
+		if ( world.spec?.progress !== false ) game.completeLevel();
 
 	}
 
