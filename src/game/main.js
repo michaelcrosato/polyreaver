@@ -20,7 +20,7 @@ import { Game } from './game.js';
 import { RenderContext } from './render/context.js';
 import { UI } from './ui/shell.js';
 import { installInput } from './input.js';
-import { all } from './core/registry.js';
+import { all, get } from './core/registry.js';
 
 const SAVE_KEY = 'polyreaver.save.v1';
 
@@ -108,7 +108,9 @@ async function boot() {
 	const ui = new UI( game, document.getElementById( 'ui' ) );
 	ui.init();
 	game.ui = ui; game.rc = rc;
-	const poll = installInput( game, rc, renderer.domElement, ( a ) => ui.action( a ) );
+	// the combat feature can replace the baseline input with define( 'inputProvider', { id: 'default', install } )
+	const install = get( 'inputProvider', 'default' )?.install ?? installInput;
+	const poll = install( game, rc, renderer.domElement, ( a ) => ui.action( a ) );
 
 	game.events.on( 'world', ( { world } ) => {
 

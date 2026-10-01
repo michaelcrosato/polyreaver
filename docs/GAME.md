@@ -60,6 +60,7 @@ override baseline). Kinds:
 | `worldHook` | any sim | `{ id, order, onWorld(game, world) }` — populate a new world (spawns, mechanics, NPCs, listeners) |
 | `saveField` | any sim | `{ id, init() }` — persistent character data (plain JSON) |
 | `statSource` | any sim | `{ id, mods(game, player) → mods[] }` — gear, tree, level, buffs from save |
+| `inputProvider` | combat | `{ id: 'default', install(game, rc, dom, onUiAction) → poll(dt) }` — replaces `src/game/input.js` |
 | `controller` | combat / monsters | `{ id, create(game, entity) → { update(world, e, dt) } }` |
 | `status` | combat (+ any) | `{ id, name, tags, duration, stack: 'refresh'\|'add'\|'max', maxStacks, flags[], mods(s, e) → mods, onApply, onTick(world, e, s, dt), onExpire, immuneFlag }` |
 | `skill` | combat | player active skill — see §6 |
@@ -156,6 +157,23 @@ States `dodge` (roll), `hit` (flinch along `hitDir`), `stun` (wobble), `dead` (`
   `model = { type: 'creature', genome }`; bosses use `size` ≥ 2.
 * **Hero**: `model = { type: 'hero', id: 'reaver', weapon: { base, rarity, color }, gear: {…tints} }` — keep the engine's
   triangle-person hero look (see `src/crowd/models.js`, yellow marker ring) as a segmented rig.
+
+### Cross-feature hand-offs (who emits / who consumes)
+
+* **Rewards**: monsters set `data.xp`, `data.rarity` (`normal magic rare unique boss`), `data.lootMult`; progression's
+  reward hook (redefine worldHook id `baseline-rewards`) grants XP/gold/loot on `death`.
+* **Population**: monsters' director replaces worldHook id `baseline-population`; it reads `world.layout.spawns`,
+  `layout.rooms` (`kind: 'boss'`) and the level spec (`families`, `boss`).
+* **Exit**: the boss's death (or the director when a level has no boss) emits `exitOpen {x,z}`; the world feature spawns
+  the portal; using it calls `game.completeLevel()` and sets `world.state.complete = true`.
+* **Interact**: the world feature's sim emits `interact {entity, target}` when the player presses interact near an NPC /
+  prop; NPCs carry `data.service` (`vendor craft stash tree skills waypoint gamble dummy`); the client opens the panel with
+  that id (progression owns `vendor craft stash tree skills inventory character`, world owns `waypoint`).
+* **Potion**: the player controller emits `potion {entity}` on the potion input; progression's flasks consume it.
+* **Rig attachments**: the rig renderer publishes `rc.attach` = Map(entity id → `{ weaponBase, weaponTip, handL, handR,
+  head, chest }` THREE.Vector3s) every frame; VFX use it for weapon trails and cast origins (fallback: from facing).
+* **Hit flash**: renderers flash entities from `e.anim.hitTime` (sim time of the last hit) — no extra wiring.
+* **Equipment look**: progression sets `player.model.weapon = { base, rarity, color }` and `model.gear`.
 
 ## 6. Skills (combat feature)
 
