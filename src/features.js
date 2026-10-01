@@ -29,8 +29,8 @@ export const SECTIONS = [
 			{
 				key: 'capacity', label: 'Max crowd (GPU buffer size)', type: 'select', def: 'auto', cost: 1, bound: 'memory',
 				options: [ [ 'auto', 'Auto' ], ...CAPACITIES.map( ( c ) => [ c, fmt( c ) ] ) ],
-				info: 'How big the storage buffers are. Each agent costs 32 bytes (plus 64 more in GPU-driven mode). Changing it re-allocates buffers and resets the crowd.',
-				mobile: '256k is a safe mobile ceiling; 4M agents need about 384 MB of GPU memory in GPU-driven mode.'
+				info: 'How big the storage buffers are. Each agent costs 48 bytes (position, AI state, animation blend). The GPU-driven path adds 128 more for its per-model visible lists, and up to 128 again for shadow-caster lists when the crowd casts shadows; skeletal animation adds 480 for the first 131k agents. Changing it re-allocates buffers and resets the crowd.',
+				mobile: '256k is a safe mobile ceiling; 4M agents need about 740 MB of buffers in GPU-driven mode (200 MB on the direct path).'
 			},
 			{
 				key: 'tier', label: 'Character model', type: 'select', def: 0, cost: 2, bound: 'vertex',
