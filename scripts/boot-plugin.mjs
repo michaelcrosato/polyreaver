@@ -32,7 +32,8 @@ export function bootPlugin( metadata ) {
 
 			const shell = readFileSync( resolve( 'src/boot/shell.html' ), 'utf8' ).replaceAll( '__BOOT_VERSION__', metadata.version ).replaceAll( '__BOOT_BUILD__', metadata.build );
 			const watchdog = readFileSync( resolve( 'src/boot/watchdog.js' ), 'utf8' );
-			return html.replace( '<!-- boot-shell -->', `${shell}\n<script>${watchdog}</script>` );
+			const icon = '<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230b1016%22/%3E%3Ctext x=%2216%22 y=%2224%22 text-anchor=%22middle%22 font-family=%22monospace%22 font-size=%2224%22 fill=%22%23f3d284%22%3EP%3C/text%3E%3C/svg%3E">';
+			return html.replace( '</head>', icon + '\n</head>' ).replace( '<!-- boot-shell -->', `${shell}\n<script>${watchdog}</script>` );
 
 		}
 	};
