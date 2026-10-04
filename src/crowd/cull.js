@@ -14,7 +14,7 @@
 import * as THREE from 'three/webgpu';
 import {
 	Fn, If, float, int, uint, vec3, instancedArray, storage, instanceIndex, max, min, select, length,
-	step, atomicAdd, atomicStore, dot
+	step, atomicAdd, atomicStore, dot, mix
 } from 'three/tsl';
 
 // Object layer only the sun's shadow camera renders. three.js r186's ShadowNode
@@ -80,6 +80,13 @@ function makeCullPass( crowd, draw, { tiers, planes, record, bufs, animBufs, nam
 
 		const i = instanceIndex;
 		const rd = renderBuf.element( i ).toVar();
+		if ( crowd.profile?.previous ) {
+
+			const previous = crowd.profile.previous.element( i );
+			rd.x.assign( mix( previous.x, rd.x, crowd.profile.alpha ) );
+			rd.z.assign( mix( previous.y, rd.z, crowd.profile.alpha ) );
+
+		}
 		const c = vec3( rd.x, 0.9, rd.z );
 		const visible = float( 1 ).toVar();
 		for ( const p of planes ) visible.mulAssign( step( - 1.3, dot( p.xyz, c ).add( p.w ) ) );
@@ -97,6 +104,7 @@ function makeCullPass( crowd, draw, { tiers, planes, record, bufs, animBufs, nam
 			const t = u.lodThresholds;
 			const lodTier = select( px.greaterThan( t.x ), float( 3 ), select( px.greaterThan( t.y ), float( 2 ), select( px.greaterThan( t.z ), float( 1 ), float( 0 ) ) ) );
 			const tier = int( select( u.lodOn.greaterThan( 0.5 ), min( lodTier, u.maxTier ), u.maxTier ) ).toVar();
+			if ( crowd.profile ) If( i.equal( 0 ), () => { tier.assign( min( u.maxTier, 1 ) ); } );
 			for ( const k of tiers ) {
 
 				If( tier.equal( k ), () => {

@@ -132,6 +132,9 @@ export function vat( crowd, tier ) {
 
 export function makeMaterial( crowd, inst, anim, tier, { hull = false } = {} ) {
 
+	const override = crowd.profile?.material?.( crowd, inst, anim, tier, { hull } );
+	if ( override ) return override;
+
 	if ( hull ) {
 
 		const mat = new THREE.MeshBasicNodeMaterial( { side: THREE.BackSide } );

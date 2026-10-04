@@ -11,7 +11,7 @@
 //   node scripts/smoke.mjs --shots out/       (also save a screenshot per scenario)
 //   node scripts/smoke.mjs --url http://localhost:5173/
 
-import { chromium } from 'playwright';
+import { launchBrowser } from './browser.mjs';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -27,7 +27,7 @@ const opt = ( name, def ) => {
 
 const quick = argv.includes( '--quick' );
 const shots = opt( '--shots', null );
-const url = opt( '--url', pathToFileURL( resolve( 'dist/index.html' ) ).href ) + '#count=1500';
+const url = opt( '--url', pathToFileURL( resolve( 'webgpu-crowd-stress.html' ) ).href ) + '#count=1500';
 const FRAMES = 6;
 
 const scenarios = [ { name: 'baseline', set: {} } ];
@@ -124,7 +124,7 @@ function fakeClaude() {
 
 }
 
-const browser = await chromium.launch( { args: FLAGS } );
+const browser = await launchBrowser( { args: FLAGS } );
 const page = await browser.newPage( { viewport: { width: 900, height: 560 } } );
 await page.addInitScript( fakeClaude );
 let logs = [];
@@ -140,6 +140,9 @@ const failures = [];
 const t0 = Date.now();
 console.log( 'loading ' + url );
 await page.goto( url );
+await page.waitForFunction( () => window.__fatal || window.__boot?.status === 'ready' );
+if ( await page.evaluate( () => window.__fatal ) ) throw new Error( await page.evaluate( () => window.__fatal ) );
+await page.locator( '[data-boot-choice="stress"]' ).click();
 await page.waitForFunction( () => window.__fatal || window.app?.frameCount >= 3, null, { timeout: 180000 } );
 const fatalAtLoad = await page.evaluate( () => window.__fatal || null );
 if ( fatalAtLoad ) {

@@ -6,7 +6,7 @@
 //
 //   npm run build:game && node scripts/game-smoke.mjs [--shots dir/] [--depth 3] [--url ...]
 
-import { chromium } from 'playwright';
+import { launchBrowser } from './browser.mjs';
 import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -26,7 +26,7 @@ const url = opt( '--url', pathToFileURL( resolve( 'dist-game/game.html' ) ).href
 const FLAGS = [ '--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPUService', '--use-vulkan=swiftshader', '--use-webgpu-adapter=swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist' ];
 const NOISE = /Download the|DevTools|experimental on this platform|deprecated parameters for the initialization function|permissions policy violation/;
 
-const browser = await chromium.launch( { args: FLAGS } );
+const browser = await launchBrowser( { args: FLAGS } );
 const page = await browser.newPage( { viewport: { width: 960, height: 600 } } );
 const errors = [];
 page.on( 'console', ( m ) => {
@@ -71,6 +71,9 @@ const frames = ( n ) => page.evaluate( ( n ) => new Promise( ( r ) => {
 await step( 'boot + town', async () => {
 
 	await page.goto( url );
+	await page.waitForFunction( () => window.__fatal || window.__boot?.status === 'ready' );
+	if ( await page.evaluate( () => window.__fatal ) ) throw new Error( await page.evaluate( () => window.__fatal ) );
+	await page.locator( '[data-boot-choice="game"]' ).click();
 	await page.waitForFunction( () => window.__fatal || window.game?.frameCount >= 5, null, { timeout: 180000 } );
 	// post-processing off for the long steps: under SwiftShader the bloom pass stalls the
 	// GPU process after ~70 frames (real GPUs are fine); the 'post-processing' step below
@@ -206,6 +209,8 @@ await step( 'restricted iframe', async () => {
 		}
 
 		if ( ! frame ) throw new Error( 'iframe did not load' );
+		await frame.waitForFunction( () => window.__fatal || window.__boot?.status === 'ready' );
+		await frame.locator( '[data-boot-choice="game"]' ).click();
 		await frame.waitForFunction( () => window.__fatal || window.game?.frameCount >= 6, null, { timeout: 180000 } );
 		const r = await frame.evaluate( () => ( { frames: window.game.frameCount, world: window.game.world?.frame, errors: ( window.game.errors || [] ).map( ( e ) => e.msg ) } ) );
 		if ( ! r.world ) throw new Error( 'the simulation did not advance inside the iframe' );

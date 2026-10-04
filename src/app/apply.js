@@ -117,8 +117,9 @@ export function applyPhysics( app ) {
 	if ( S.physics && ! physics.enabled ) {
 
 		physics.heroHeading = app.hero.heading;
-		physics.enable( app.hero.pos ).then( () => physics.setShadows( S.shadows !== 'off' ) ).catch( ( e ) => {
+		app.physicsStartup = physics.enable( app.hero.pos ).then( () => physics.setShadows( S.shadows !== 'off' ) ).catch( ( e ) => {
 
+			if ( app.boot?.state.status !== 'running' ) throw e;
 			console.error( e );
 			app.ui.setWarnings( [ 'Rapier failed to load: ' + e.message ] );
 

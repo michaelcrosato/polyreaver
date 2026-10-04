@@ -21,6 +21,7 @@ export const PHYS_KEYS = new Set( [ 'physics', 'crowdMode', 'rapierAgents', 'age
 
 export function fatal( title, detail ) {
 
+	if ( window.__bootFail ) return window.__bootFail( new Error( title + ': ' + detail ) );
 	const el = document.getElementById( 'fatal' );
 	el.querySelector( 'h2' ).textContent = title;
 	el.querySelector( '.detail' ).textContent = detail;

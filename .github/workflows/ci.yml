@@ -1,6 +1,5 @@
-# Runs on every push: lint, both builds and a short headless game simulation (a
-# couple of minutes). The built single-file HTMLs are attached to the run so they
-# can be downloaded from the Actions tab.
+# Runs on every push: lint, city validation, all builds, boot browser checks,
+# and a short headless game simulation. Downloads include standalone HTMLs.
 name: Build
 
 on:
@@ -11,7 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,11 +19,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - run: npm run test:city
       - run: npm run build
-      - run: npm run build:game
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:boot
       - name: Check the committed single-file builds are current
         run: |
-          for f in webgpu-crowd-stress.html polyreaver.html; do
+          for f in webgpu-crowd-stress.html polyreaver.html city-demo.html; do
             if ! git diff --quiet -- "$f"; then
               echo "::warning file=$f::The committed $f is older than the source. Rebuild and commit it."
             fi
@@ -41,4 +42,9 @@ jobs:
         with:
           name: polyreaver
           path: polyreaver.html
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyreaver-city
+          path: city-demo.html
           retention-days: 30

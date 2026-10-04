@@ -1,4 +1,4 @@
-# WebGPU Crowd Stress Test
+# Polyreaver and WebGPU Crowd Stress Test
 
 A mass-crowd stress test built on **three.js r186 + WebGPU only** (no WebGL fallback on purpose).
 Thousands to millions of low-poly "triangle people" wander a plaza, simulated by a compute
@@ -8,9 +8,90 @@ the GPU it stresses. The idea: find out how big a crowd (or monster horde) your 
 and which effects cut off which hardware.
 
 * **`webgpu-crowd-stress.html`** – the whole app in **one self-contained file** (three.js, Rapier WASM,
-  code, CSS all inlined, ~3.2 MB). Put it anywhere and open it.
+  code and CSS embedded). Put it anywhere and open it, finish startup, then choose an engine.
 * **`src/`** – the readable source (plain ES modules, no framework).
 * **`polyreaver.html`** – **Polyreaver**, the engine's showcase game (see below), also one self-contained file.
+* **`city-demo.html`** – a procedurally generated city with 100,000 persistent GPU citizens plus the player.
+
+## Standard startup and engine choice
+
+Open `/`, `/game.html`, `polyreaver.html`, or `webgpu-crowd-stress.html`. A small,
+dependency-free boot screen checks platform capabilities, initializes the WebGPU
+device, and verifies engine requirements. When it says **READY**, choose **Hack
+and slash** or **Stress test**. Existing hash options apply to the engine you choose.
+The city entry uses the same checks, then starts the city directly.
+
+The hosted boot shell is about 16 KB. Only the chosen engine is requested after
+checks pass. Standalone files contain both engines as inert payloads; only the
+selected one is decoded and evaluated. UI templates are mounted at that point.
+The main loop starts only after renderer/system initialization and the first frame
+complete successfully.
+
+Startup diagnostics include version, a reproducible content build ID, browser/platform,
+renderer, available adapter details, capabilities, stage history, and errors. Failures
+retain the report on screen with a retry button. **Copy diagnostics** also reveals a
+manual-copy box if clipboard permissions are unavailable. A failed report is retained
+locally when storage permits. Storage denial is reported but does not prevent play.
+
+Both engines require WebGPU compute/storage; the loader tries core and compatibility
+adapters. It reports WebGL2 availability on failure, but WebGL2 cannot run these engines.
+There is no silent renderer downgrade. See [the reusable boot contract](docs/BOOT.md)
+for stage codes, integration, failure behavior, and validation coverage.
+
+`npm run build` builds the hosted site in `dist/` and refreshes all three standalone
+HTMLs. `build:game` and `build:city` are compatibility aliases for the same build.
+`npm run test:boot` verifies both hosted choices, deferred requests, phone/keyboard UI,
+failed device/module/system/first-frame initialization, timeouts, device loss, storage
+denial, compatibility retry, and JavaScript-disabled diagnostics.
+
+## Procedural city
+
+Open **`city-demo.html`** directly, or run `npm run dev -- --port 5190` and visit
+**http://localhost:5190/city.html**. `npm run build:city` rebuilds the self-contained
+city file, including its generation worker. The engine chooser is at `/`.
+
+The 2,048 × 2,048 m city has seeded neighborhoods, rectangular buildings, civic
+services, parks, sidewalks, signals, a canal with three bridges, small vehicle traffic,
+and 100,000 persistent citizens. Citizens retain home/work/leisure addresses, follow
+shared GPU routes, wait at crossings, and reserve outdoor destination slots. Service
+buildings are destinations and game-ready data; civic economies and interiors are
+future work.
+
+**Controls:** WASD/arrows walk, Shift run, drag pan/orbit, wheel zoom, Q/E rotate,
+1–5 cameras, M/Tab overview, C find player, P pause, H hide UI. Click a building for
+its address/capacities and a highlighted route. Touch movement uses the left joystick.
+Use the City panel for seed/regeneration, population, and citizen detail.
+
+Ordinary buildings use ten triangles. Distant citizens use two-triangle camera-facing
+markers and nearby citizens use the existing animated crowd models. City generation,
+collision and pedestrian navigation all derive from the same layout. The browser
+reports live citizen counts, geometry, allocation budgets, and simulation tick drops.
+
+```bash
+npm run test:city                 # 50 seeds, geometry/capacity and route checks
+npm run build:city
+npm run smoke:city                # offline software-WebGPU correctness + screenshots
+npm run bench:city                # 4 scenarios, fixed 1080p, real GPU required
+```
+
+The 100K/1080p/60 fps target requires a real-device benchmark. Software SwiftShader
+testing establishes correctness and buffer limits, not hardware frame rates. In WSL,
+open the local city page in **Windows Chrome/Edge**, keep it in the foreground, and
+click **Benchmark** at 100,000 citizens. Each of four scenarios warms up for 10 seconds
+and records 60 seconds; copy the JSON from the report box. The report includes adapter,
+resolution, per-scenario timings, geometry, allocations, and dropped simulation time.
+The traversal scenario concentrates 512 citizens on one bridge to test congestion.
+The benchmark restores citizen and player state afterward.
+
+To check the benchmark runner with software rendering, without making a performance
+claim: `npm run bench:city -- --software --warmup 0 --seconds 1`.
+Browser scripts can use installed Chrome when the pinned Playwright browser is absent;
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` selects another installed executable.
+
+The specification is [docs/CITY_PLAN.md](docs/CITY_PLAN.md). The debugging API on
+`window.city` exposes `describe()`, `validate({full:true})` (all-agent GPU reduction),
+`sampleCitizens(ids)` (at most 256), `regenerate(config)`, `pause(value)`,
+`stepTicks(n)` (explicit validation), and `benchmark(options)`.
 
 ## Polyreaver: the showcase game
 

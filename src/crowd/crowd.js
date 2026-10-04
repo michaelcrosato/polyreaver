@@ -42,13 +42,16 @@ export class Crowd {
 
 		this.renderer = renderer;
 		this.scene = scene;
-		this.models = getModels();
+		// Optional domain profile is installed before allocation/kernel construction.
+		// The default stress test retains its existing simulation and model indices.
+		this.profile = options.profile || null;
+		this.models = this.profile?.models || getModels();
 		this.storageInVertex = ( options.limits?.maxStorageBuffersInVertexStage ?? 8 ) > 0;
 
 		this.capacity = 0;
 		this.count = options.count ?? 20000;
-		this.tier = 0;
-		this.path = 'direct';
+		this.tier = this.profile?.tier ?? 0;
+		this.path = this.profile?.path ?? 'direct';
 		this.materialKind = 'unlit';
 		this.animSystem = 'procedural';
 		this.animBlend = true;
@@ -144,6 +147,7 @@ export class Crowd {
 		this.lodGeos = null;
 		this.casterBufs = null;
 		this._needsInit = true;
+		this.profile?.allocate?.( this );
 		this._buildComputes();
 		this._rebuildMeshes();
 
@@ -153,7 +157,8 @@ export class Crowd {
 	// these methods forward to them so existing callers keep working.
 	_buildComputes() {
 
-		buildComputes( this );
+		if ( this.profile?.buildComputes ) this.profile.buildComputes( this );
+		else buildComputes( this );
 
 	}
 
@@ -316,6 +321,8 @@ export class Crowd {
 	// Per-frame update
 	// -----------------------------------------------------------------------
 	update( dt, time, camera, viewportHeight ) {
+
+		if ( this.profile?.update ) return this.profile.update( this, dt, time, camera, viewportHeight );
 
 		const u = this.u;
 		u.dt.value = Math.min( dt, 0.1 );
@@ -489,6 +496,7 @@ export class Crowd {
 
 		const attrs = this.renderer._attributes;
 		if ( ! attrs || ! this.renderBuf ) return;
+		this.profile?.free?.( this );
 		const list = [ this.renderBuf, this.simBuf, this.animBuf, this.boneBuf, ...( this.lodBufs || [] ), ...( this.lodAnimBufs || [] ),
 			...( this.casterBufs || [] ), ...( this.casterAnimBufs || [] ) ].filter( Boolean ).map( ( n ) => n.value );
 		if ( this.drawArgs ) list.push( this.drawArgs );
@@ -506,6 +514,15 @@ export class Crowd {
 		this.drawArgs = null;
 		this.boneBuf = null;
 		this.boneCap = 0;
+
+	}
+
+	dispose() {
+
+		this.disposed = true;
+		this._disposeMeshes();
+		this._freeStorage();
+		this.scene.remove( this.group );
 
 	}
 

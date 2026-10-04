@@ -6,14 +6,19 @@
   "scripts": {
     "dev": "vite",
     "dev:lan": "vite --mode lan",
-    "build": "vite build && node scripts/postbuild.mjs",
+    "build": "node scripts/build.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "smoke": "node scripts/smoke.mjs",
     "smoke:quick": "node scripts/smoke.mjs --quick",
-    "build:game": "vite build --config vite.game.config.js && node scripts/postbuild-game.mjs",
+    "build:game": "node scripts/build.mjs",
     "sim": "node scripts/sim.mjs",
-    "smoke:game": "node scripts/game-smoke.mjs"
+    "smoke:game": "node scripts/game-smoke.mjs",
+    "test:city": "node --test scripts/city-validate.mjs",
+    "build:city": "node scripts/build.mjs",
+    "smoke:city": "node scripts/city-smoke.mjs",
+    "bench:city": "node scripts/city-benchmark.mjs",
+    "test:boot": "node scripts/boot-smoke.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",

@@ -4,3 +4,9 @@ dist/
 *.log
 .claude/worktrees/
 dist-game/
+dist-city/
+artifacts/city/
+
+.vercel/
+artifacts/boot/
+.env*

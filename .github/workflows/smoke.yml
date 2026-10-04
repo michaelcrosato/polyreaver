@@ -41,9 +41,9 @@ jobs:
       - if: steps.changed.outputs.run == 'true'
         run: npm run smoke -- --shots smoke-shots
       - if: steps.changed.outputs.run == 'true'
-        run: npm run build:game
-      - if: steps.changed.outputs.run == 'true'
         run: npm run smoke:game -- --shots smoke-shots/game
+      - if: steps.changed.outputs.run == 'true'
+        run: npm run smoke:city -- --shots smoke-shots/city
       - uses: actions/upload-artifact@v4
         if: always() && steps.changed.outputs.run == 'true'
         with:

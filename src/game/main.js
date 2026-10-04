@@ -7,7 +7,8 @@
 //                      #fresh    ignore the saved character   #lab=creature  open a Workshop lab
 
 import * as THREE from 'three/webgpu';
-import { createDevice } from '../gpu.js';
+import layout from '../boot/layouts/game.html?raw';
+import { mountLayout } from '../boot/layout.js';
 import './sim-entry.js';
 import './render/placeholder.js';
 import './render/post.js';
@@ -25,16 +26,6 @@ import { installInput } from './input.js';
 import { all, get } from './core/registry.js';
 
 const SAVE_KEY = 'polyreaver.save.v1';
-
-function fatal( title, detail ) {
-
-	const el = document.getElementById( 'fatal' );
-	el.querySelector( 'h2' ).textContent = title;
-	el.querySelector( '.detail' ).textContent = detail;
-	el.style.display = 'flex';
-	window.__fatal = title + ': ' + detail;
-
-}
 
 function readHash() {
 
@@ -77,20 +68,10 @@ export function writeSave( game ) {
 
 }
 
-async function boot() {
+export async function initialize( { gpu, boot } ) {
 
+	mountLayout( layout );
 	const opts = readHash();
-	let gpu;
-	try {
-
-		gpu = await createDevice();
-
-	} catch ( e ) {
-
-		fatal( 'WebGPU is not available', e.message + '\n\nPolyreaver runs on WebGPU only. Try Chrome / Edge 113+, Safari 26+, Firefox 141+ (Windows) or Chrome for Android 121+.' );
-		return;
-
-	}
 
 	const renderer = new THREE.WebGPURenderer( { device: gpu.device, antialias: true, trackTimestamp: gpu.timestamps } );
 	renderer.setPixelRatio( Math.min( devicePixelRatio, opts.dpr ? + opts.dpr : 2 ) );
@@ -99,8 +80,9 @@ async function boot() {
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
 	renderer.toneMappingExposure = 1.05;
 	document.getElementById( 'game' ).append( renderer.domElement );
-	await renderer.init();
-	renderer.onDeviceLost = ( info ) => fatal( 'GPU device lost', info.message );
+	await boot.step( 'REN', 'Initializing game renderer', 55, () => renderer.init() );
+	boot.stop = () => renderer.setAnimationLoop( null );
+	renderer.onDeviceLost = ( info ) => boot.fail( new Error( info.message ), 'GPU-LOST' );
 
 	const saved = opts.fresh ? null : loadSave();
 	const game = new Game( { seed: opts.seed || 'polyreaver', save: saved } );
@@ -156,6 +138,7 @@ async function boot() {
 
 		} catch ( e ) {
 
+			if ( boot.state.status !== 'running' ) throw e;
 			const msg = `${stage}: ${e?.message || e}`;
 			if ( game.errors.length < 50 && ! game.errors.some( ( x ) => x.msg === msg ) ) {
 
@@ -174,7 +157,7 @@ async function boot() {
 		}
 
 	};
-	renderer.setAnimationLoop( () => {
+	const frame = () => {
 
 		const now = performance.now();
 		const dt = Math.min( 0.1, ( now - last ) / 1000 );
@@ -192,8 +175,8 @@ async function boot() {
 		guard( 'ui', () => ui.update( dt ) );
 		game.frameCount ++;
 
-	} );
+	};
+
+	return { frame, start: () => renderer.setAnimationLoop( frame ), stop: () => renderer.setAnimationLoop( null ) };
 
 }
-
-boot();

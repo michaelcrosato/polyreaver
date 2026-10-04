@@ -1,7 +1,8 @@
 // WebGPU crowd stress test - application wiring.
 
 import * as THREE from 'three/webgpu';
-import { createDevice } from './gpu.js';
+import layout from './boot/layouts/stress.html?raw';
+import { mountLayout } from './boot/layout.js';
 import { Crowd } from './crowd/crowd.js';
 import { World } from './world.js';
 import { CameraRig } from './camera.js';
@@ -13,7 +14,7 @@ import { defaults, PRESETS, CAPACITIES } from './features.js';
 import { UI, Graph } from './ui.js';
 import { Bench } from './bench.js';
 import { ClaudeLink } from './bridge.js';
-import { IS_MOBILE, DPR, CROWD_KEYS, SHADING_KEYS, WORLD_KEYS, RES_KEYS, POST_KEYS, PHYS_KEYS, fatal, readHash } from './app/config.js';
+import { IS_MOBILE, DPR, CROWD_KEYS, SHADING_KEYS, WORLD_KEYS, RES_KEYS, POST_KEYS, PHYS_KEYS, readHash } from './app/config.js';
 import { applyCrowd, applyShading, applyWorld, applyCamera, applyPost, applyPhysics } from './app/apply.js';
 import { updateHero } from './app/hero.js';
 import { updateHud, buildReport } from './app/hud.js';
@@ -21,19 +22,10 @@ import { bindButtons, hotkey } from './app/controls.js';
 
 class App {
 
-	async init() {
+	async init( { gpu, boot } ) {
 
-		let gpu;
-		try {
-
-			gpu = await createDevice();
-
-		} catch ( e ) {
-
-			fatal( 'WebGPU is not available', e.message + '\n\nThis demo is WebGPU-only on purpose (no WebGL fallback). Try Chrome/Edge 113+, Safari 26+ (iOS 26 / macOS Tahoe), Firefox 141+ (Windows) or Chrome for Android 121+, over https:// or localhost.' );
-			return;
-
-		}
+		mountLayout( layout );
+		this.boot = boot;
 
 		this.gpu = gpu;
 		this.S = { ...defaults(), ...readHash() };
@@ -44,8 +36,9 @@ class App {
 		renderer.setPixelRatio( 1 );
 		renderer.setSize( innerWidth, innerHeight );
 		document.getElementById( 'app' ).appendChild( renderer.domElement );
-		await renderer.init();
-		renderer.onDeviceLost = ( info ) => fatal( 'GPU device lost', `${info.message}\n\nThe GPU driver reset or ran out of memory (common when pushing huge crowds on phones). Reload the page and use a smaller crowd / capacity.` );
+		await boot.step( 'REN', 'Initializing stress-test renderer', 55, () => renderer.init() );
+		boot.stop = () => renderer.setAnimationLoop( null );
+		renderer.onDeviceLost = ( info ) => boot.fail( new Error( info.message ), 'GPU-LOST' );
 		this.defaultLighting = renderer.lighting;
 
 		this.scene = new THREE.Scene();
@@ -79,15 +72,26 @@ class App {
 		this.rig.onUserInput = () => {};
 
 		this.applyAll( this.S );
+		if ( this.physicsStartup ) await this.physicsStartup;
+		boot.assertActive();
 		window.addEventListener( 'resize', () => this.resize() );
 
 		this.stats = { frames: 0, acc: 0, cpu: 0, last: performance.now(), fps: 0, frameMs: 0, cpuMs: 0, gpuRender: 0, gpuCompute: 0 };
 		this._lastFrame = performance.now();
 		this._startTime = performance.now();
 		this.link = new ClaudeLink( this );
-		renderer.setAnimationLoop( () => this.frame() );
+
 		window.app = this;
-		this.link.start().catch( ( e ) => console.warn( 'Claude link unavailable', e ) );
+		return {
+			frame: () => this.frame(),
+			start: () => {
+
+				renderer.setAnimationLoop( () => this.frame() );
+				this.link.start().catch( ( e ) => console.warn( 'Claude link unavailable', e ) );
+
+			},
+			stop: () => renderer.setAnimationLoop( null )
+		};
 
 	}
 
@@ -431,9 +435,8 @@ class App {
 
 }
 
-new App().init().catch( ( e ) => {
+export function initialize( context ) {
 
-	console.error( e );
-	fatal( 'Startup failed', e.stack || String( e ) );
+	return new App().init( context );
 
-} );
+}

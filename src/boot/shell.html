@@ -1,0 +1,51 @@
+<style>
+html, body { margin: 0; background: #0b1016; }
+#boot { position: fixed; inset: 0; z-index: 2147483647; overflow: auto; background: #0b1016; color: #dce6ed; font: 14px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 32px; box-sizing: border-box; touch-action: pan-y; user-select: text; -webkit-user-select: text; color-scheme: dark; }
+#boot[hidden], #boot [hidden] { display: none !important; }
+#boot .boot-inner { max-width: 780px; margin: 4vh auto; }
+#boot h1 { font: inherit; font-size: 25px; letter-spacing: .12em; margin: 0 0 4px; color: #f3d284; }
+#boot p { margin: 8px 0 16px; }
+#boot .boot-dim { color: #a1b2bf; }
+#boot dl { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 3px 12px; border-block: 1px solid #30404f; padding: 16px 0; margin: 20px 0; }
+#boot dt { color: #a1b2bf; } #boot dd { margin: 0; overflow-wrap: anywhere; }
+#boot progress { width: 100%; height: 8px; accent-color: #f3d284; display: block; margin: 16px 0; }
+#boot-log { padding-left: 0; list-style: none; color: #a9cdb4; }
+#boot-error { color: #ffb8a9; white-space: pre-wrap; overflow-wrap: anywhere; }
+#boot .boot-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+#boot button, #boot a { font: inherit; color: #eaf0f5; background: #182430; border: 1px solid #667d90; padding: 11px 15px; border-radius: 3px; cursor: pointer; text-decoration: none; }
+#boot button:focus-visible, #boot a:focus-visible, #boot textarea:focus-visible { outline: 3px solid #f3d284; outline-offset: 3px; }
+#boot button:hover, #boot a:hover { border-color: #f3d284; }
+#boot-choices button { flex: 1 1 240px; text-align: left; min-height: 94px; }
+#boot-choices strong, #boot-choices span { display: block; }
+#boot-choices span { font-size: 12px; color: #a1b2bf; margin-top: 6px; }
+#boot-report { width: 100%; min-height: 160px; box-sizing: border-box; background: #101923; color: #dce6ed; font: inherit; }
+@media (max-width: 480px) { #boot { font-size: 12px; } #boot .boot-inner { margin-top: 0; } #boot dl { grid-template-columns: 74px minmax(0, 1fr); } }
+</style>
+<main id="boot" aria-labelledby="boot-title">
+<div class="boot-inner">
+<h1 id="boot-title">POLYREAVER</h1>
+<p class="boot-dim">SYSTEM STARTUP / BOOT PROTOCOL 1</p>
+<dl>
+<dt>Version</dt><dd id="boot-version">__BOOT_VERSION__</dd>
+<dt>Build</dt><dd id="boot-build">__BOOT_BUILD__</dd>
+<dt>Platform</dt><dd id="boot-platform">Detecting…</dd>
+<dt>Renderer</dt><dd id="boot-renderer">Not initialized</dd>
+<dt>Adapter</dt><dd id="boot-adapter">Not available</dd>
+<dt>Stage</dt><dd id="boot-stage" role="status" aria-live="polite">BOOT / Loading startup module</dd>
+</dl>
+<progress id="boot-progress" max="100" value="0" aria-label="Startup progress"></progress>
+<ol id="boot-log" aria-label="Startup log"></ol>
+<p id="boot-error" role="alert" hidden></p>
+<section id="boot-choices" hidden aria-label="Choose engine version">
+<p>Boot complete. Choose your engine version.</p>
+<div class="boot-actions">
+<button type="button" data-boot-choice="game"><strong>Hack and slash</strong><span>Explore, fight, and build your character.</span></button>
+<button type="button" data-boot-choice="stress"><strong>Stress test</strong><span>Push the crowd engine and graphics settings.</span></button>
+</div>
+</section>
+<div class="boot-actions"><button id="boot-copy" type="button">Copy diagnostics</button><button id="boot-retry" type="button" hidden>Retry startup</button></div>
+<p id="boot-help" class="boot-dim" hidden>Take a screenshot of this screen or copy the report for a bug report. Reload to retry.</p>
+<textarea id="boot-report" aria-label="Startup diagnostic report" readonly hidden></textarea>
+<noscript><p>JS-OFF / JavaScript is disabled. Enable JavaScript and reload to start the game. Version __BOOT_VERSION__ · Build __BOOT_BUILD__</p></noscript>
+</div>
+</main>

@@ -1,12 +1,14 @@
 # WebGPU Crowd Stress Test — notes for Claude
 
 three.js r186 (`three/webgpu` + TSL), **WebGPU only, no WebGL fallback**, Rapier 0.19.3 (compat, lazy
-loaded), Vite single-file build. README.md has the user-facing docs and the full file layout.
+loaded), Vite hosted builds with deferred engines plus standalone downloads. README.md has the user-facing docs and the full file layout.
 
 ## Commands
 - `npm run lint` — ESLint (fast; run after every change).
-- `npm run build` — writes `dist/index.html` and the committed `webgpu-crowd-stress.html`. Commit the
-  rebuilt HTML with source changes.
+- `npm run build` — writes the lightweight hosted boot shell and lazy engines in `dist/`, plus all
+  three committed standalone HTMLs. Commit the rebuilt HTML with source changes.
+- `npm run test:boot` — staged boot, chooser, deferred loading, and failure-injection browser tests.
+- Boot contract: `docs/BOOT.md`; browser entries export `initialize()` and never auto-start loops.
 - `npm run smoke:quick` (~30 s) / `npm run smoke` (~5-10 min) — headless Chromium + SwiftShader after a
   build. Checks errors only; SwiftShader fps is meaningless.
 
