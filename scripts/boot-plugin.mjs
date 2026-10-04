@@ -19,7 +19,7 @@ export function bootMetadata() {
 
 	};
 	walk( 'src' ); walk( 'scripts' );
-	for ( const path of [ 'package.json', 'package-lock.json', 'vite.config.js', 'index.html', 'game.html', 'city.html' ] ) hash.update( readFileSync( path ) );
+	for ( const path of [ 'package.json', 'package-lock.json', 'vite.config.js', 'index.html', 'game.html', 'city.html', 'classic.html' ] ) hash.update( readFileSync( path ) );
 	return { version: JSON.parse( readFileSync( 'package.json' ) ).version, build: hash.digest( 'hex' ).slice( 0, 12 ) };
 
 }

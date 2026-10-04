@@ -5,6 +5,13 @@ The default brand is Polyreaver. Branding, version, build ID, engine labels and
 loader callbacks are supplied to `BootLoader`; lifecycle, codes, diagnostics,
 timeouts and the final loop hand-off are shared.
 
+The main **Stress test** choice loads `src/city/main.js` (100,000 citizens), while
+**Hack and slash** loads `src/game/main.js`. The original `src/main.js` plaza test
+has an explicit **Classic crowd test** link in the city panel and a separate
+`classic-crowd.html` download (`classic.html` during development). Both main
+chooser downloads embed the game and city payloads. Classic uses its own payload;
+the city is never replaced by the old demo when opening a standalone chooser.
+
 ## Ordered stages
 
 | Code | Work | Failure code |
@@ -40,7 +47,7 @@ progress, work, timeout)` for awaited initialization, and `boot.assertActive()`
 after asynchronous work outside those steps. Late completion after timeout must
 never start a loop. Optional systems such as saving may report degraded operation.
 
-Both current engines and the city need WebGPU compute/storage. Core and
+The game, city, and classic crowd test need WebGPU compute/storage. Core and
 compatibility adapters are tried in that order, including browser-supplied software
 adapters. WebGL2 is detected and reported when WebGPU initialization fails; it is
 not a working backend for these engines. Adding an engine with a different backend
@@ -65,9 +72,9 @@ load failures; a noscript message covers disabled JavaScript.
 ## Builds and compatibility
 
 `npm run build` generates all hosted entries in `dist/`, hashed engine payloads in
-`dist/engines/`, and the three committed standalone HTML downloads. `build:game`
+`dist/engines/`, and the four committed standalone HTML downloads. `build:game`
 and `build:city` are aliases. The hosted shell has a hard 35 KB build limit (currently
-about 16 KB) and includes no Three.js, Rapier, gameplay, or game UI dependencies.
+about 17 KB) and includes no Three.js, Rapier, gameplay, or game UI dependencies.
 The chooser appears before any engine request. Standalone downloads carry base64
 payloads as inert script data; only the selected payload becomes a JavaScript Blob
 module after checks. Standalone files can be opened directly on a WebGPU-capable
@@ -81,13 +88,14 @@ artifacts without a self-referential commit hash or a nondeterministic timestamp
 ## Verification
 
 `npm run test:boot` serves the actual production build and verifies no engine or
-full UI before READY; both real engine launches; first-frame and loop hand-off;
+full UI before READY; both real engine launches, including 100,001 active city agents,
+city controls, standalone/offline city selection and classic navigation; first-frame and loop hand-off;
 phone layout and keyboard selection; missing GPU/adapter/WebAssembly, device
 rejection, compatibility retry, storage denial, device loss, import/system/frame
 errors, late initialization after timeout, and JavaScript-disabled diagnostics.
 Screenshots go to `artifacts/boot/`. `--url https://…/` checks the deployed site.
 
-`npm run smoke` exercises the full stress engine; `npm run smoke:game` checks town,
+`npm run smoke` exercises the classic crowd engine; `npm run smoke:game` checks town,
 combat, graphics, all panels, workshop and restricted iframe behavior;
 `npm run smoke:city` checks standalone generation/rendering and 100K citizens.
 Software WebGPU establishes correctness, not hardware frame-rate claims.

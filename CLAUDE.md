@@ -6,8 +6,10 @@ loaded), Vite hosted builds with deferred engines plus standalone downloads. REA
 ## Commands
 - `npm run lint` — ESLint (fast; run after every change).
 - `npm run build` — writes the lightweight hosted boot shell and lazy engines in `dist/`, plus all
-  three committed standalone HTMLs. Commit the rebuilt HTML with source changes.
+  four committed standalone HTMLs. Commit the rebuilt HTML with source changes.
 - `npm run test:boot` — staged boot, chooser, deferred loading, and failure-injection browser tests.
+- Main Stress test choice launches `src/city/main.js`. The original crowd benchmark is
+  `classic-crowd.html` (development: `classic.html`), linked from the city panel.
 - Boot contract: `docs/BOOT.md`; browser entries export `initialize()` and never auto-start loops.
 - `npm run smoke:quick` (~30 s) / `npm run smoke` (~5-10 min) — headless Chromium + SwiftShader after a
   build. Checks errors only; SwiftShader fps is meaningless.
@@ -45,7 +47,7 @@ rendering/physics, the full one before merging a large change. CI runs the full 
 - Inspect visually with the Workshop (`lab.*` api commands, `#lab=workshop`) and screenshots.
 
 ## Claude link (benchmarks on the user's real GPU)
-Artifact: https://claude.ai/artifact/LePB3jW73zXCViKwbA3RUx (published from `webgpu-crowd-stress.html`
+Artifact: https://claude.ai/artifact/LePB3jW73zXCViKwbA3RUx (classic demo; publish `classic-crowd.html`
 with capabilities `db`, `user`, `assets`). When the user has it open, queue work with the `ArtifactData`
 tool: `set` `commands/<id>` = `{ "cmd": "...", "args": {...}, "status": "pending" }`, then read
 `results/<id>` (and `commands/<id>.status`). Commands: `ping`, `report`, `settings`, `preset {id}`,

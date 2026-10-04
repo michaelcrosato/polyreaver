@@ -1,16 +1,15 @@
 # Polyreaver and WebGPU Crowd Stress Test
 
-A mass-crowd stress test built on **three.js r186 + WebGPU only** (no WebGL fallback on purpose).
-Thousands to millions of low-poly "triangle people" wander a plaza, simulated by a compute
-shader and animated in the vertex shader. Every rendering feature starts **off**, and each one
-can be switched on individually with a note on what it does, what it costs, and which part of
-the GPU it stresses. The idea: find out how big a crowd (or monster horde) your game can afford,
-and which effects cut off which hardware.
+Polyreaver combines a hack-and-slash game with a procedural city stress test built on
+**three.js r186 + WebGPU**. After startup, choose the game or explore a generated city
+with 100,000 persistent citizens, neighborhoods, streets, bridges, and benchmarking.
+The original plaza crowd benchmark remains available as **Classic crowd test**, with
+its individual graphics settings, animation systems, and Rapier physics tools.
 
-* **`webgpu-crowd-stress.html`** – the whole app in **one self-contained file** (three.js, Rapier WASM,
-  code and CSS embedded). Put it anywhere and open it, finish startup, then choose an engine.
+* **`webgpu-crowd-stress.html`** – the whole app in **one self-contained file** (three.js, code and CSS embedded). Finish startup, then choose the game or the procedural city stress test.
 * **`src/`** – the readable source (plain ES modules, no framework).
 * **`polyreaver.html`** – **Polyreaver**, the engine's showcase game (see below), also one self-contained file.
+* **`classic-crowd.html`** – the original plaza crowd/graphics/physics benchmark, also linked from the city controls.
 * **`city-demo.html`** – a procedurally generated city with 100,000 persistent GPU citizens plus the player.
 
 ## Standard startup and engine choice
@@ -18,10 +17,13 @@ and which effects cut off which hardware.
 Open `/`, `/game.html`, `polyreaver.html`, or `webgpu-crowd-stress.html`. A small,
 dependency-free boot screen checks platform capabilities, initializes the WebGPU
 device, and verifies engine requirements. When it says **READY**, choose **Hack
-and slash** or **Stress test**. Existing hash options apply to the engine you choose.
+and slash** or **Stress test**. Stress test opens the procedural city with 100,000
+citizens, city generation controls, overview, building inspection, and benchmarking.
+The original plaza demo is available as **Classic crowd test** in the city panel.
+Existing hash options apply to the engine you choose.
 The city entry uses the same checks, then starts the city directly.
 
-The hosted boot shell is about 16 KB. Only the chosen engine is requested after
+The hosted boot shell is about 17 KB. Only the chosen engine is requested after
 checks pass. Standalone files contain both engines as inert payloads; only the
 selected one is decoded and evaluated. UI templates are mounted at that point.
 The main loop starts only after renderer/system initialization and the first frame
@@ -38,7 +40,7 @@ adapters. It reports WebGL2 availability on failure, but WebGL2 cannot run these
 There is no silent renderer downgrade. See [the reusable boot contract](docs/BOOT.md)
 for stage codes, integration, failure behavior, and validation coverage.
 
-`npm run build` builds the hosted site in `dist/` and refreshes all three standalone
+`npm run build` builds the hosted site in `dist/` and refreshes all four standalone
 HTMLs. `build:game` and `build:city` are compatibility aliases for the same build.
 `npm run test:boot` verifies both hosted choices, deferred requests, phone/keyboard UI,
 failed device/module/system/first-frame initialization, timeouts, device loss, storage
@@ -112,22 +114,22 @@ A fast isometric hack-and-slash built on this engine, in the spirit of Path of E
 | For AI agents | [`docs/AGENTS.md`](docs/AGENTS.md): JSON command API (`game.api`), the Workshop asset galleries, a playtest bot, a headless balance sim, the Claude link. The contract: [`docs/GAME.md`](docs/GAME.md) |
 | Headless | `npm run sim -- --depth 1-20` plays the real game in Node with the bot and prints a balance table |
 
-## Running it
+## Running the classic crowd benchmark
 
 | Where | How |
 |---|---|
-| Desktop | Open `webgpu-crowd-stress.html` directly (double-click), or `npm install && npm run dev`. |
-| Phone (easiest) | Host the single file on any **https** URL. With GitHub Pages: *Settings → Pages → Deploy from a branch → `main` / `(root)`*, then open `https://<you>.github.io/<repo>/webgpu-crowd-stress.html`. |
+| Desktop | Open `classic-crowd.html` directly (double-click), or `npm install && npm run dev`. |
+| Phone (easiest) | Host the single file on any **https** URL. With GitHub Pages: *Settings → Pages → Deploy from a branch → `main` / `(root)`*, then open `https://<you>.github.io/<repo>/classic-crowd.html`. |
 | Phone on your LAN | `npm run dev:lan` starts an **https** dev server (self-signed certificate: accept the warning) and prints a `https://192.168.x.x:5173` address. Plain `http://` on a LAN IP will **not** work: WebGPU needs a secure context. |
-| Rebuild the single file | `npm run build` → writes `dist/index.html` and copies it to `webgpu-crowd-stress.html`. |
+| Rebuild | `npm run build` → hosted site in `dist/` and all four standalone downloads. |
 
 Browsers with WebGPU: Chrome / Edge 113+ (desktop), Chrome for Android 121+ (Android 12+, most
 Qualcomm/ARM GPUs), Safari 26+ (iOS / iPadOS 26, macOS Tahoe), Firefox 141+ (Windows). If WebGPU is
 missing the page says so and stops. That's intentional: this is a WebGPU stress test.
 
 Settings live in the URL hash, so a configuration can be shared or bookmarked, e.g.
-`webgpu-crowd-stress.html#count=200000&shading=lambert&blobShadows=1` or
-`webgpu-crowd-stress.html#preset=console`. The *Copy settings link* button builds one for you.
+`classic-crowd.html#count=200000&shading=lambert&blobShadows=1` or
+`classic-crowd.html#preset=console`. The *Copy settings link* button builds one for you.
 
 ## Controls
 
@@ -445,15 +447,15 @@ animation) and *Physics playground* (Rapier bodies raining on a colliding crowd)
 |---|---|
 | `npm run dev` | dev server with hot reload |
 | `npm run lint` | ESLint (catches undefined names, unused code) |
-| `npm run build` | single-file build → `dist/index.html` + `webgpu-crowd-stress.html` |
+| `npm run build` | hosted site in `dist/` and all four standalone downloads |
 | `npm run build:game` | Polyreaver single-file build → `dist-game/` + `polyreaver.html` |
 | `npm run sim` | Polyreaver headless: the bot plays depths in Node (`--depth 1-20`, `--seconds`, `--seed`, `--naked`, `--json`) |
 | `npm run smoke:game` | after `build:game`: town, a level with the bot, every UI panel and the Workshop in headless Chromium |
 | `npm run smoke` | after a build: headless Chromium with a software GPU walks every preset, animation system, stylize mode and physics action, and checks the Claude link against a fake database. Fails on any page or WebGPU error. `--quick` for a 1-2 minute version, `--shots dir/` saves screenshots. |
 
-GitHub runs two automatic jobs (*Actions* tab): **Build** (lint, both builds and a short headless
+GitHub runs two automatic jobs (*Actions* tab): **Build** (lint, city validation, all builds, boot browser checks and a short headless
 game simulation on every push; the built HTML files are downloadable from the run) and **Smoke test**
-(both smoke tests, nightly if something was pushed that day, or on demand with *Run workflow*). The smoke test proves things run, not how
+(classic crowd, game and city smoke tests, nightly if something was pushed that day, or on demand with *Run workflow*). The smoke test proves things run, not how
 fast: the software GPU is a CPU rasteriser.
 
 ## Project layout

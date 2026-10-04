@@ -25,7 +25,7 @@ jobs:
       - run: npm run test:boot
       - name: Check the committed single-file builds are current
         run: |
-          for f in webgpu-crowd-stress.html polyreaver.html city-demo.html; do
+          for f in webgpu-crowd-stress.html polyreaver.html city-demo.html classic-crowd.html; do
             if ! git diff --quiet -- "$f"; then
               echo "::warning file=$f::The committed $f is older than the source. Rebuild and commit it."
             fi
@@ -47,4 +47,9 @@ jobs:
         with:
           name: polyreaver-city
           path: city-demo.html
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classic-crowd
+          path: classic-crowd.html
           retention-days: 30

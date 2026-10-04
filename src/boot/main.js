@@ -22,7 +22,11 @@ async function loadEngine( id ) {
 
 const boot = new BootLoader( {
 	brand: 'POLYREAVER', version: __BOOT_VERSION__, build: __BOOT_BUILD__,
-	modes: Object.fromEntries( [ [ 'game', 'hack and slash' ], [ 'stress', 'stress test' ], [ 'city', 'city demo' ] ].map( ( [ id, label ] ) => [ id, { label, load: () => loadEngine( id ) } ] ) )
+	modes: {
+		game: { label: 'hack and slash', load: () => loadEngine( 'game' ) },
+		stress: { label: 'procedural city stress test', load: () => loadEngine( 'city' ) },
+		classic: { label: 'classic crowd test', load: () => loadEngine( 'stress' ) }
+	}
 } );
 
 try {
@@ -77,7 +81,8 @@ try {
 		}
 
 	} );
-	if ( document.body.dataset.bootMode === 'city' ) await boot.launch( 'city', gpu );
+	if ( document.body.dataset.bootMode === 'city' ) await boot.launch( 'stress', gpu );
+	else if ( document.body.dataset.bootMode === 'classic' ) await boot.launch( 'classic', gpu );
 	else boot.choose( gpu );
 
 } catch ( error ) {
