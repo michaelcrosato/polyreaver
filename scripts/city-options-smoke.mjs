@@ -150,6 +150,20 @@ try {
 		assert.equal( await page.evaluate( () => window.city.bench.running ), false );
 
 	} );
+	await step( 'standard benchmark Stop keeps the city running', async () => {
+
+		const original = await page.evaluate( () => ( { ...window.city.S } ) );
+		await page.evaluate( () => window.city.set( 'count', 100000 ) );
+		await page.getByRole( 'tab', { name: 'City', exact: true } ).click();
+		await page.locator( '#benchmark' ).click();
+		await page.waitForFunction( () => window.city.benchmarking );
+		await page.getByRole( 'tab', { name: 'Engine options', exact: true } ).click();
+		await page.getByRole( 'button', { name: '■ Stop', exact: true } ).click();
+		await page.waitForFunction( () => ! window.city.benchmarking, null, { timeout: 120000 } );
+		assert.equal( await page.evaluate( () => window.__boot.status ), 'running' );
+		await page.evaluate( ( original ) => window.city.applyAll( original ), original );
+
+	} );
 	await page.selectOption( '#engine-select', 'classic' );
 	await page.waitForFunction( () => window.__fatal || window.__boot?.status === 'running' && window.app?.frameCount > 2, null, { timeout: 180000 } );
 	assert.equal( await page.evaluate( () => window.__boot.mode ), 'classic' );

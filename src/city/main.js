@@ -97,7 +97,7 @@ class CityApp {
 			catch { $( 'report-text' ).value = report; $( 'report-text' ).hidden = false; }
 
 		};
-		$( 'benchmark' ).onclick = () => this.benchmark().then( ( report ) => { $( 'report-text' ).hidden = false; $( 'report-text' ).value = JSON.stringify( report, null, 2 ); } ).catch( ( e ) => this.fail( e ) );
+		$( 'benchmark' ).onclick = () => this.benchmark().then( ( report ) => { $( 'report-text' ).hidden = false; $( 'report-text' ).value = JSON.stringify( report, null, 2 ); } ).catch( ( e ) => { $( 'status' ).textContent = e.message; this.ui.setWarnings( [ e.message ] ); } );
 		this.input.onKey = ( e ) => {
 
 			if ( /^Digit[1-5]$/.test( e.code ) ) this.cameraMode( CAMERA_MODES[ Number( e.code.slice( - 1 ) ) - 1 ].id );
