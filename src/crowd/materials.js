@@ -272,8 +272,10 @@ export function rebuildMeshes( crowd ) {
 			ensureCasters( crowd );
 			for ( let k = 0; k <= crowd.tier; k ++ ) {
 
-				const mat = new THREE.MeshBasicNodeMaterial();
-				mat.positionNode = vertexNode( crowd, crowd.casterBufs[ k ].toAttribute(), crowd.casterAnimBufs[ k ].toAttribute(), k );
+				const inst = crowd.casterBufs[ k ].toAttribute(), anim = crowd.casterAnimBufs[ k ].toAttribute();
+				const override = crowd.profile?.material?.( crowd, inst, anim, k, { shadow: true } );
+				const mat = override || new THREE.MeshBasicNodeMaterial();
+				if ( ! override ) mat.positionNode = vertexNode( crowd, inst, anim, k );
 				mat.name = 'CrowdShadowCaster';
 				const caster = addMesh( crowd.casterGeos[ k ], mat, { kind: 'caster', tier: k } );
 				caster.castShadow = true;

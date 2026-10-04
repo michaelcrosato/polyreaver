@@ -17,14 +17,16 @@ its individual graphics settings, animation systems, and Rapier physics tools.
 Open `/`, `/game.html`, `polyreaver.html`, or `webgpu-crowd-stress.html`. A small,
 dependency-free boot screen checks platform capabilities, initializes the WebGPU
 device, and verifies engine requirements. When it says **READY**, choose **Hack
-and slash** or **Stress test**. Stress test opens the procedural city with 100,000
+and slash**, **City stress test**, or **Classic crowd stress test**. City stress test opens the procedural city with 100,000
 citizens, city generation controls, overview, building inspection, and benchmarking.
-The original plaza demo is available as **Classic crowd test** in the city panel.
+The **Experience** switcher stays visible in each test. Switch city ↔ classic or
+return to **Choose engine**. Switching reloads the same document and restores each
+test’s settings, so it also works from a single downloaded HTML file.
 Existing hash options apply to the engine you choose.
 The city entry uses the same checks, then starts the city directly.
 
-The hosted boot shell is about 17 KB. Only the chosen engine is requested after
-checks pass. Standalone files contain both engines as inert payloads; only the
+The hosted boot shell is about 19 KB. Only the chosen engine is requested after
+checks pass. Standalone files contain all three engines as inert payloads; only the
 selected one is decoded and evaluated. UI templates are mounted at that point.
 The main loop starts only after renderer/system initialization and the first frame
 complete successfully.
@@ -62,7 +64,19 @@ future work.
 **Controls:** WASD/arrows walk, Shift run, drag pan/orbit, wheel zoom, Q/E rotate,
 1–5 cameras, M/Tab overview, C find player, P pause, H hide UI. Click a building for
 its address/capacities and a highlighted route. Touch movement uses the left joystick.
-Use the City panel for seed/regeneration, population, and citizen detail.
+Use the **City** tab for seed/regeneration, population, and cameras. The **Engine
+options** tab reuses all 67 controls and all ten presets from the classic test:
+shading/lighting, shadows, environment, resolution/upscaling, anti-aliasing, post
+processing, character models, animation systems, rendering paths, and Rapier physics.
+It also includes maximum-crowd and effect-cost benchmarks, reports, and settings links.
+
+The city retains its 100,000-citizen scenario limit (classic can go into the millions).
+Density adjusts lane concentration; activity adjusts destination dwell time;
+converge/flee follow streets to addresses near/far from the player. Physics moves are
+projected onto street corridors so citizens retain valid navigation. Trees and lamps
+can topple; buildings stay static. These differences are explained beside the controls.
+Settings persist when regenerating or switching tests. Far citizens remain cheap
+billboards with GPU LOD; the direct path draws the selected full character model.
 
 Ordinary buildings use ten triangles. Distant citizens use two-triangle camera-facing
 markers and nearby citizens use the existing animated crowd models. City generation,
@@ -73,6 +87,7 @@ reports live citizen counts, geometry, allocation budgets, and simulation tick d
 npm run test:city                 # 50 seeds, geometry/capacity and route checks
 npm run build:city
 npm run smoke:city                # offline software-WebGPU correctness + screenshots
+npm run smoke:city-options        # presets, graphics/physics controls and switching
 npm run bench:city                # 4 scenarios, fixed 1080p, real GPU required
 ```
 

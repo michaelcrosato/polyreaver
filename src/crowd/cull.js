@@ -104,7 +104,7 @@ function makeCullPass( crowd, draw, { tiers, planes, record, bufs, animBufs, nam
 			const t = u.lodThresholds;
 			const lodTier = select( px.greaterThan( t.x ), float( 3 ), select( px.greaterThan( t.y ), float( 2 ), select( px.greaterThan( t.z ), float( 1 ), float( 0 ) ) ) );
 			const tier = int( select( u.lodOn.greaterThan( 0.5 ), min( lodTier, u.maxTier ), u.maxTier ) ).toVar();
-			if ( crowd.profile ) If( i.equal( 0 ), () => { tier.assign( min( u.maxTier, 1 ) ); } );
+			if ( crowd.profile ) If( i.equal( 0 ), () => { tier.assign( max( tier, min( u.maxTier, 1 ) ) ); } );
 			for ( const k of tiers ) {
 
 				If( tier.equal( k ), () => {

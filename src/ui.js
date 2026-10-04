@@ -24,26 +24,34 @@ const h = ( tag, attrs = {}, ...children ) => {
 
 export class UI {
 
-	constructor( S, { onChange, onPreset, onAction } ) {
+	constructor( S, { onChange, onPreset, onAction, sections = SECTIONS, presets = PRESETS, body, panel, warnings, camera = true, countSteps = COUNT_STEPS, hint, benchHint, bindPanel = true } ) {
 
 		this.S = S;
 		this.onChange = onChange;
 		this.onPreset = onPreset;
 		this.onAction = onAction;
 		this.controls = new Map();
-		this.maxCount = COUNT_STEPS[ COUNT_STEPS.length - 1 ];
+		this.presets = presets;
+		this.countSteps = countSteps;
+		this.hint = hint;
+		this.benchHint = benchHint;
+		this.maxCount = countSteps[ countSteps.length - 1 ];
 
-		this.panel = document.getElementById( 'panel' );
-		this.body = document.getElementById( 'panel-body' );
+		this.panel = panel || document.getElementById( 'panel' );
+		this.body = body || document.getElementById( 'panel-body' );
 		this.hud = document.getElementById( 'hud' );
-		this.warnEl = document.getElementById( 'warnings' );
+		this.warnEl = warnings || document.getElementById( 'warnings' );
 
-		document.getElementById( 'panel-toggle' ).addEventListener( 'click', () => this.togglePanel() );
-		document.getElementById( 'hud' ).addEventListener( 'click', () => this.hud.classList.toggle( 'expanded' ) );
+		if ( bindPanel ) {
+
+			document.getElementById( 'panel-toggle' ).addEventListener( 'click', () => this.togglePanel() );
+			document.getElementById( 'hud' ).addEventListener( 'click', () => this.hud.classList.toggle( 'expanded' ) );
+
+		}
 
 		this._buildPresets();
-		this._buildCamera();
-		for ( const section of SECTIONS ) this._buildSection( section );
+		if ( camera ) this._buildCamera();
+		for ( const section of sections ) this._buildSection( section );
 		this._buildBench();
 
 		if ( window.matchMedia( '(min-width: 900px)' ).matches ) this.panel.classList.add( 'open' );
@@ -59,7 +67,7 @@ export class UI {
 	_buildPresets() {
 
 		const row = h( 'div', { class: 'presets' } );
-		for ( const [ id, p ] of Object.entries( PRESETS ) ) {
+		for ( const [ id, p ] of Object.entries( this.presets ) ) {
 
 			row.append( h( 'button', { class: 'chip', text: p.label, onclick: () => this.onPreset( id ) } ) );
 
@@ -67,7 +75,7 @@ export class UI {
 
 		this.body.append( h( 'div', { class: 'section open' },
 			h( 'div', { class: 'section-title static', text: 'Presets' } ),
-			h( 'p', { class: 'hint', text: 'Everything starts OFF. Turn features on one at a time and watch the frame time. Tap ⓘ for what each one costs and why.' } ),
+			h( 'p', { class: 'hint', text: this.hint || 'Everything starts OFF. Turn features on one at a time and watch the frame time. Tap ⓘ for what each one costs and why.' } ),
 			row ) );
 
 	}
@@ -95,7 +103,11 @@ export class UI {
 	_sectionShell( title, body, open = false ) {
 
 		const sec = h( 'div', { class: 'section' + ( open ? ' open' : '' ) } );
-		const head = h( 'button', { class: 'section-title', text: title, onclick: () => sec.classList.toggle( 'open' ) } );
+		const head = h( 'button', { class: 'section-title', text: title, 'aria-expanded': String( open ), onclick: () => {
+
+			head.setAttribute( 'aria-expanded', String( sec.classList.toggle( 'open' ) ) );
+
+		} } );
 		sec.append( head, body );
 		return sec;
 
@@ -157,17 +169,17 @@ export class UI {
 
 		} else if ( item.type === 'count' ) {
 
-			control = h( 'input', { type: 'range', min: 0, max: COUNT_STEPS.length - 1, step: 1, oninput: ( e ) => {
+			control = h( 'input', { type: 'range', min: 0, max: this.countSteps.length - 1, step: 1, oninput: ( e ) => {
 
-				const v = COUNT_STEPS[ parseInt( e.target.value ) ];
+				const v = this.countSteps[ parseInt( e.target.value ) ];
 				valueLabel.textContent = formatCount( v );
 				this.onChange( item.key, v );
 
 			} } );
 			set = ( v ) => {
 
-				let idx = COUNT_STEPS.findIndex( ( s ) => s >= v );
-				if ( idx < 0 ) idx = COUNT_STEPS.length - 1;
+				let idx = this.countSteps.findIndex( ( s ) => s >= v );
+				if ( idx < 0 ) idx = this.countSteps.length - 1;
 				control.value = idx;
 				valueLabel.textContent = formatCount( v );
 
@@ -175,6 +187,7 @@ export class UI {
 
 		}
 
+		control.id = `setting-${item.key}`;
 		const dots = h( 'span', { class: 'cost cost' + item.cost, title: `Cost: ${COST_LABEL[ item.cost ]} · ${item.bound}` },
 			'●'.repeat( Math.max( 1, item.cost ) ) + '○'.repeat( 4 - Math.max( 1, item.cost ) ) );
 		const info = h( 'div', { class: 'info' },
@@ -182,13 +195,14 @@ export class UI {
 			h( 'div', { text: item.info } ),
 			item.mobile ? h( 'div', { class: 'mobile', text: '📱 ' + item.mobile } ) : null );
 		const row = h( 'div', { class: 'row item', 'data-key': item.key },
-			h( 'label', { text: item.label } ),
+			h( 'label', { text: item.label, for: control.id } ),
 			h( 'div', { class: 'ctrl' }, control, valueLabel ),
 			dots,
 			h( 'button', { class: 'info-btn', text: 'ⓘ', title: 'What does this cost?', onclick: () => row.classList.toggle( 'show-info' ) } ),
 			info );
 
 		set( S[ item.key ] );
+		if ( item.disabled ) { control.disabled = true; row.title = item.disabled; info.prepend( h( 'div', { text: item.disabled } ) ); }
 		this.controls.set( item.key, { el: control, set } );
 		return row;
 
@@ -204,7 +218,7 @@ export class UI {
 		this.resultsOut.style.display = 'none';
 		const btn = ( text, action ) => h( 'button', { class: 'chip', text, onclick: () => this.onAction( action ) } );
 		const body = h( 'div', { class: 'section-body' },
-			h( 'p', { class: 'hint', text: 'Run these on each device you care about, then copy the report. "Standard benchmark" uses fixed conditions (1920×1080, whole crowd in view, default settings) so results compare across devices; it takes 1-3 minutes. "Max crowd" ramps the agent count with your current settings until the frame no longer fits the target. "Effect costs" toggles each feature on top of your current settings and measures the extra milliseconds.' } ),
+			h( 'p', { class: 'hint', text: this.benchHint || 'Run these on each device you care about, then copy the report. "Standard benchmark" uses fixed conditions (1920×1080, whole crowd in view, default settings) so results compare across devices; it takes 1-3 minutes. "Max crowd" ramps the agent count with your current settings until the frame no longer fits the target. "Effect costs" toggles each feature on top of your current settings and measures the extra milliseconds.' } ),
 			h( 'div', { class: 'presets' }, btn( '▶ Standard benchmark', 'benchStandard' ) ),
 			h( 'div', { class: 'row' }, h( 'label', { text: 'Target' } ), target ),
 			h( 'div', { class: 'presets' }, btn( '▶ Find max crowd', 'benchCrowd' ), btn( '▶ Measure effect costs', 'benchFx' ), btn( '■ Stop', 'benchStop' ) ),

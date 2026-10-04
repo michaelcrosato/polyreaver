@@ -51,7 +51,7 @@ export async function runStandard( bench ) {
 
 		const crowdTest = async ( n, label, settings ) => {
 
-			app.applyAll( { ...base, ...settings, count: 5000 } );
+			await app.applyAll( { ...base, ...settings, count: 5000 } );
 			const r = await bench.searchCrowd( STANDARD.targetFps, ( h ) => show( `${n}/4 Crowd: ${label}`, h ) );
 			done.push( `${n}. ${label}: <b>${formatCount( r.maxAgents )}</b> agents${r.hitCapacity ? ' (buffer limit)' : ''}` );
 			return r;
@@ -62,8 +62,8 @@ export async function runStandard( bench ) {
 		const boxDirect = await crowdTest( 2, 'direct path, Box-man', { tier: 2 } );
 		const gpu = await crowdTest( 3, 'GPU-driven, Box-man + LOD', { path: 'gpu', tier: 2 } );
 
-		app.applyAll( { ...base, count: STANDARD.looksAgents } );
-		app.preset( STANDARD.looksPreset );
+		await app.applyAll( { ...base, count: STANDARD.looksAgents } );
+		await app.preset( STANDARD.looksPreset );
 		show( `4/4 Looks: ${STANDARD.looksPreset} preset, ${formatCount( STANDARD.looksAgents )} agents`, 'measuring…' );
 		const m = await bench._measure( 1500, 3000 );
 		const s = [ ...bench.samples ].sort( ( a, b ) => a - b );
@@ -97,7 +97,7 @@ export async function runStandard( bench ) {
 
 	app.rig.setBenchView( null );
 	app.setFixedResolution( null );
-	app.applyAll( original );
+	await app.applyAll( original );
 	bench.running = false;
 	return result;
 

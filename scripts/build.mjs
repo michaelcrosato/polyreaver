@@ -44,9 +44,9 @@ for ( const file of [ 'game.html', 'polyreaver.html', 'webgpu-crowd-stress.html'
 for ( const file of [ 'city.html', 'city-demo.html' ] ) writeFileSync( `dist/${file}`, cityShell );
 for ( const file of [ 'classic.html', 'classic-crowd.html' ] ) writeFileSync( `dist/${file}`, classicShell );
 const standalone = ( html, ids ) => html.replace( '</body>', ids.map( ( id ) => `<script type="application/octet-stream" id="boot-engine-${id}">${sources[ id ]}</script>` ).join( '\n' ) + '\n</body>' );
-const chooser = standalone( shell, [ 'game', 'city' ] );
-const city = standalone( cityShell, [ 'city' ] );
-const classic = standalone( classicShell, [ 'stress' ] );
+const chooser = standalone( shell, [ 'game', 'city', 'stress' ] );
+const city = standalone( cityShell, [ 'game', 'city', 'stress' ] );
+const classic = standalone( classicShell, [ 'game', 'city', 'stress' ] );
 for ( const [ file, content ] of Object.entries( { 'webgpu-crowd-stress.html': chooser, 'polyreaver.html': chooser, 'city-demo.html': city, 'classic-crowd.html': classic, 'dist-game/game.html': chooser, 'dist-city/city.html': city } ) ) {
 
 	mkdirSync( resolve( file, '..' ), { recursive: true } );

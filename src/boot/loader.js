@@ -1,3 +1,5 @@
+import { installSwitcher } from './switcher.js';
+
 // Dependency-free boot protocol. Games supply checks and a deferred engine loader;
 // only this module owns the startup state machine and the final loop hand-off.
 export class BootLoader {
@@ -184,6 +186,7 @@ export class BootLoader {
 			this.render();
 			document.getElementById( 'engine-root' ).hidden = false;
 			document.getElementById( 'boot' ).hidden = true;
+			installSwitcher( this );
 
 		} catch ( error ) {
 

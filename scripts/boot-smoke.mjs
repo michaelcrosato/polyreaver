@@ -72,7 +72,7 @@ try {
 
 		await page.goto( url ); await ready( page );
 		assert.equal( await page.evaluate( () => window.__boot.status ), 'ready' );
-		for ( const id of [ 'game', 'stress' ] ) {
+		for ( const id of [ 'game', 'stress', 'classic' ] ) {
 
 			const box = await page.locator( `[data-boot-choice="${id}"]` ).boundingBox();
 			assert.ok( box.width >= 44 && box.height >= 44 && box.x >= 0 && box.x + box.width <= 390 );

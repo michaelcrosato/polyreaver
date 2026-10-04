@@ -38,7 +38,7 @@ function crowdRadius( crowd ) {
 
 }
 
-function ensurePhysicsBuffers( crowd ) {
+export function ensurePhysicsBuffers( crowd ) {
 
 	if ( crowd.collide && ! crowd.collider ) {
 
@@ -330,6 +330,17 @@ export function buildComputes( crowd ) {
 		animBuf.element( i ).assign( vec4( prevState, blend, prevPhase, fi ) );
 
 	} )().compute( crowd.capacity ).setName( 'Crowd Simulate' );
+
+	buildSharedComputes( crowd );
+
+}
+
+// Animation and physics transfer kernels shared by domain-specific simulations.
+export function buildSharedComputes( crowd ) {
+
+	const u = crowd.u, renderBuf = crowd.renderBuf, animBuf = crowd.animBuf;
+	ensurePhysicsBuffers( crowd );
+	crowd.skelCompute?.dispose(); crowd.proxyReset?.dispose(); crowd.proxyGather?.dispose();
 
 	// --- skeletal: per-agent forward kinematics -> bone matrices --------------
 	crowd.skelCompute = null;

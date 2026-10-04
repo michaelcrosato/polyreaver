@@ -5,12 +5,16 @@ The default brand is Polyreaver. Branding, version, build ID, engine labels and
 loader callbacks are supplied to `BootLoader`; lifecycle, codes, diagnostics,
 timeouts and the final loop hand-off are shared.
 
-The main **Stress test** choice loads `src/city/main.js` (100,000 citizens), while
+The main **City stress test** choice loads `src/city/main.js` (100,000 citizens), while
 **Hack and slash** loads `src/game/main.js`. The original `src/main.js` plaza test
-has an explicit **Classic crowd test** link in the city panel and a separate
-`classic-crowd.html` download (`classic.html` during development). Both main
-chooser downloads embed the game and city payloads. Classic uses its own payload;
-the city is never replaced by the old demo when opening a standalone chooser.
+has its own **Classic crowd stress test** choice and a separate
+`classic-crowd.html` download (`classic.html` during development). All standalone downloads embed all three engines. A persistent **Experience** selector
+switches engines by reloading the same file with `?engine=game|stress|classic`;
+`?engine=choose` returns to the chooser. A fresh document releases old workers,
+GPU resources, listeners and module singletons. Per-test hashes/settings are retained
+in optional session storage. Switching therefore needs neither adjacent files nor a
+server when using a standalone download. Hosted pages still request only the selected
+engine bundle after boot checks pass.
 
 ## Ordered stages
 
@@ -74,7 +78,7 @@ load failures; a noscript message covers disabled JavaScript.
 `npm run build` generates all hosted entries in `dist/`, hashed engine payloads in
 `dist/engines/`, and the four committed standalone HTML downloads. `build:game`
 and `build:city` are aliases. The hosted shell has a hard 35 KB build limit (currently
-about 17 KB) and includes no Three.js, Rapier, gameplay, or game UI dependencies.
+about 19 KB) and includes no Three.js, Rapier, gameplay, or game UI dependencies.
 The chooser appears before any engine request. Standalone downloads carry base64
 payloads as inert script data; only the selected payload becomes a JavaScript Blob
 module after checks. Standalone files can be opened directly on a WebGPU-capable

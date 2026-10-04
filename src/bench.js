@@ -179,11 +179,11 @@ export class Bench {
 			const r = await this.searchCrowd( targetFps, ( html ) => app.ui.setBenchOutput( html ) );
 			this.results.crowd = r;
 			this.onResult?.( 'maxCrowd', r );
-			app.set( 'count', r.maxAgents || original );
+			await app.set( 'count', r.maxAgents || original );
 
 		} catch {
 
-			app.set( 'count', original );
+			await app.set( 'count', original );
 			app.ui.setBenchOutput( '<b>Max crowd</b><br>stopped.' );
 
 		}
@@ -215,7 +215,7 @@ export class Bench {
 		while ( true ) {
 
 			n = Math.min( n, maxN );
-			app.set( 'count', n );
+			await app.set( 'count', n );
 			out( `<br>testing ${formatCount( n )}…` );
 			const m = await this._measure();
 			log.push( `${formatCount( n )} agents: ${m.fps.toFixed( 1 )} fps (frame ${m.frame.toFixed( 1 )} ms${m.gpu ? `, GPU ${m.gpu.toFixed( 1 )} ms` : ''}, CPU ${m.cpu.toFixed( 1 )} ms)` );
@@ -238,7 +238,7 @@ export class Bench {
 		for ( let k = 0; k < 4 && bad && bad - good > Math.max( 1000, good * 0.06 ); k ++ ) {
 
 			const mid = Math.round( ( good + bad ) / 2 );
-			app.set( 'count', mid );
+			await app.set( 'count', mid );
 			out( `<br>refining ${formatCount( mid )}…` );
 			const m = await this._measure();
 			log.push( `${formatCount( mid )} agents: ${m.fps.toFixed( 1 )} fps${m.gpu ? ` (GPU ${m.gpu.toFixed( 1 )} ms)` : ''}` );
@@ -246,9 +246,9 @@ export class Bench {
 
 		}
 
-		const model = app.crowd.models[ app.S.tier ];
+		const model = app.crowd.models[ app.crowd.tier ];
 		const tris = good * model.triangles;
-		out( `<br><b>Result: ${formatCount( good )} agents</b> (~${formatCount( tris )} crowd triangles) hold ${targetFps} fps${good >= maxN ? ' - that is the largest crowd buffer this GPU allows, so the real limit is higher (try a heavier model or a higher fps target)' : ''}.` );
+		out( `<br><b>Result: ${formatCount( good )} agents</b> (~${formatCount( tris )} crowd triangles) hold ${targetFps} fps${good >= maxN ? ' - ' + ( app.crowdLimitNote || 'that is the largest crowd buffer this GPU allows, so the real limit is higher (try a heavier model or a higher fps target)' ) : ''}.` );
 		return { targetFps, maxAgents: good, trianglesPerFrame: tris, model: model.id, path: app.S.path, judgedBy: byWork ? 'gpu+cpu time' : 'frame time', hitCapacity: good >= maxN, log };
 
 	}
@@ -309,13 +309,13 @@ export class Bench {
 				// of the two baselines cancels slow drift (clocks, temperature, other
 				// tabs) that a single before/after pair would count as cost.
 				const without = { ...original, ...( test.base || {} ) };
-				app.applyAll( without );
+				await app.applyAll( without );
 				render( `<br>measuring baseline for ${test.label}…` );
 				const a = await this._measure( 600, 800 );
-				app.applyAll( { ...without, ...test.set } );
+				await app.applyAll( { ...without, ...test.set } );
 				render( `<br>measuring ${test.label}…` );
 				const m = await this._measure( 900, 900 );
-				app.applyAll( without );
+				await app.applyAll( without );
 				render( `<br>measuring baseline again…` );
 				const b = await this._measure( 600, 800 );
 				const avg = ( k ) => ( a[ k ] + b[ k ] ) / 2;
@@ -342,7 +342,7 @@ export class Bench {
 		}
 
 		this.ballast.set( 0 );
-		app.applyAll( original );
+		await app.applyAll( original );
 		this.running = false;
 
 	}

@@ -8,9 +8,10 @@ loaded), Vite hosted builds with deferred engines plus standalone downloads. REA
 - `npm run build` — writes the lightweight hosted boot shell and lazy engines in `dist/`, plus all
   four committed standalone HTMLs. Commit the rebuilt HTML with source changes.
 - `npm run test:boot` — staged boot, chooser, deferred loading, and failure-injection browser tests.
-- Main Stress test choice launches `src/city/main.js`. The original crowd benchmark is
+- City stress test choice launches `src/city/main.js`. The original crowd benchmark is
   `classic-crowd.html` (development: `classic.html`), linked from the city panel.
 - Boot contract: `docs/BOOT.md`; browser entries export `initialize()` and never auto-start loops.
+- `npm run smoke:city-options` — shared catalog/presets, city renderer/physics and visible mode switching; `--quick` runs the CI subset.
 - `npm run smoke:quick` (~30 s) / `npm run smoke` (~5-10 min) — headless Chromium + SwiftShader after a
   build. Checks errors only; SwiftShader fps is meaningless.
 

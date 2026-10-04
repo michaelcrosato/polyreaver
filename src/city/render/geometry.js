@@ -50,7 +50,7 @@ export function mergedGeometry( parts ) {
 	const g = new THREE.BufferGeometry();
 	g.setAttribute( 'position', new THREE.Float32BufferAttribute( positions, 3 ) );
 	g.setAttribute( 'color', new THREE.Float32BufferAttribute( colors, 3 ) );
-	g.computeBoundingBox(); g.computeBoundingSphere(); g.userData.triangles = positions.length / 9;
+	g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere(); g.userData.triangles = positions.length / 9;
 	return g;
 
 }

@@ -18,7 +18,8 @@
     "build:city": "node scripts/build.mjs",
     "smoke:city": "node scripts/city-smoke.mjs",
     "bench:city": "node scripts/city-benchmark.mjs",
-    "test:boot": "node scripts/boot-smoke.mjs"
+    "test:boot": "node scripts/boot-smoke.mjs",
+    "smoke:city-options": "node scripts/city-options-smoke.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",

@@ -23,6 +23,7 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:boot
+      - run: npm run smoke:city-options -- --quick
       - name: Check the committed single-file builds are current
         run: |
           for f in webgpu-crowd-stress.html polyreaver.html city-demo.html classic-crowd.html; do

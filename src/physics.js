@@ -79,9 +79,14 @@ export class PhysicsDemo {
 
 			const R = await loadRapier();
 			this.world = new R.World( { x: 0, y: this.p.gravity, z: 0 } );
-			this.world.createCollider( R.ColliderDesc.cuboid( 5000, 0.5, 5000 ).setTranslation( 0, - 0.5, 0 ).setFriction( 0.9 ) );
-			this.world.createCollider( R.ColliderDesc.cylinder( 0.45, 6.8 ).setTranslation( MONUMENT.x, 0.45, MONUMENT.z ) );
-			this.world.createCollider( R.ColliderDesc.cylinder( 5.5, 0.9 ).setTranslation( MONUMENT.x, 5.5, MONUMENT.z ) );
+			if ( this.worldGfx.createPhysicsGround ) this.worldGfx.createPhysicsGround( this.world, R );
+			else {
+
+				this.world.createCollider( R.ColliderDesc.cuboid( 5000, 0.5, 5000 ).setTranslation( 0, - 0.5, 0 ).setFriction( 0.9 ) );
+				this.world.createCollider( R.ColliderDesc.cylinder( 0.45, 6.8 ).setTranslation( MONUMENT.x, 0.45, MONUMENT.z ) );
+				this.world.createCollider( R.ColliderDesc.cylinder( 5.5, 0.9 ).setTranslation( MONUMENT.x, 5.5, MONUMENT.z ) );
+
+			}
 			// hero: kinematic capsule moved by a character controller
 			this.hero = this.world.createRigidBody( R.RigidBodyDesc.kinematicPositionBased().setTranslation( heroPos.x, 0.9, heroPos.z ) );
 			this.heroCollider = this.world.createCollider( R.ColliderDesc.capsule( 0.55, 0.35 ), this.hero );

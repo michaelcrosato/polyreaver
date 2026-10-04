@@ -68,10 +68,21 @@ export function buildCityKernels( crowd, profile ) {
 
 			const nd = nav.element( i ).toVar(), sd = sim.element( i ).toVar(), rd = render.element( i ).toVar();
 			const e = nd.x.toVar();
+			If( u.behaviour.equal( 1 ).or( u.behaviour.equal( 2 ) ), () => {
+
+				const destination = select( u.behaviour.equal( 1 ), p.heroAddress, p.fleeAddress );
+				If( nd.y.notEqual( destination ), () => {
+
+					If( nd.w.greaterThan( 0 ), () => { atomicAnd( p.occupancy.element( nd.y ), uint( 0xffffffff ).bitXor( uint( 1 ).shiftLeft( nd.w.sub( 1 ) ) ) ); } );
+					nd.w.assign( 0 ); nd.y.assign( destination );
+
+				} );
+
+			} );
 			const address = map.element( uint( addressBase ).add( nd.y.mul( 2 ) ) ).toVar();
 			const addressF = map.element( uint( addressBase + 1 ).add( nd.y.mul( 2 ) ) ).toVar();
-			const speed = hashF( i, 7 ).mul( .45 ).add( .8 ).mul( 1.35 ).mul( u.speedScale );
-			const walkLateral = hashF( i, 23 ).sub( .5 ).mul( 2.4 );
+			const speed = hashF( i, 7 ).mul( .45 ).add( .8 ).mul( 1.35 ).mul( u.speedScale ).mul( select( u.activity.greaterThan( 0 ), 1, 0 ) );
+			const walkLateral = hashF( i, 23 ).sub( .5 ).mul( 2.4 ).mul( clamp( float( .35 ).div( u.density ), .2, 2 ) );
 			const wasDwelling = nd.w.greaterThan( 0 ).toVar();
 			If( wasDwelling, () => {
 
@@ -111,7 +122,7 @@ export function buildCityKernels( crowd, profile ) {
 							const old = atomicOr( p.occupancy.element( nd.y ), bit ).toVar();
 							If( old.bitAnd( bit ).equal( 0 ), () => {
 
-								nd.w.assign( slot.add( 1 ) ); sd.z.assign( hashF( i, 31 ).mul( 35 ).add( 5 ) );
+								nd.w.assign( slot.add( 1 ) ); sd.z.assign( hashF( i, 31 ).mul( 35 ).add( 5 ).mul( float( .6 ).div( max( u.activity, .01 ) ) ) );
 
 							} );
 
@@ -179,12 +190,12 @@ export function buildCityKernels( crowd, profile ) {
 					If( neighbor.notEqual( i ), () => {
 
 						const delta = position.sub( p.previous.element( neighbor ) ), d2 = dot( delta, delta );
-						If( d2.lessThan( .56 * .56 ), () => {
+						If( d2.lessThan( p.radius.mul( 2 ).pow( 2 ) ), () => {
 
 							atomicAdd( p.counters.element( 1 ), uint( 1 ) );
 							If( d2.greaterThan( 1e-8 ), () => {
 
-								const d = length( delta ); push.addAssign( delta.div( d ).mul( float( .56 ).sub( d ).mul( .25 ) ) );
+								const d = length( delta ); push.addAssign( delta.div( d ).mul( p.radius.mul( 2 ).sub( d ).mul( .25 ) ) );
 
 							} ).Else( () => {
 
@@ -228,10 +239,18 @@ export function buildCityKernels( crowd, profile ) {
 			rd.x.assign( u.heroPos.x ); rd.z.assign( u.heroPos.y ); heading.assign( u.heroHeading ); state.assign( u.heroState ); seed.assign( 0 ); speed.assign( u.heroSpeed );
 
 		} );
+		If( i.greaterThan( 0 ), () => {
+
+			If( u.behaviour.equal( 3 ), () => { state.assign( 5 ); } );
+			If( u.behaviour.equal( 4 ), () => { state.assign( select( u.time.mul( 2 ).sub( rd.x.mul( .12 ) ).mod( 6 ).lessThan( 1.5 ), 4, 0 ) ); } );
+			if ( crowd.collide && crowd.collider ) If( crowd.collider.phys.element( i ).z.greaterThan( 0 ), () => { state.assign( 7 ); } );
+			if ( crowd.rapierAgents ) If( i.lessThan( u.rapierCount ).and( crowd.rapierIO.element( i.mul( 2 ) ).z.greaterThan( 0 ) ), () => { state.assign( 7 ); } );
+
+		} );
 		const oldState = rd.w.mod( 8 ), changed = state.notEqual( oldState );
 		ad.x.assign( select( changed, oldState, ad.x ) ); ad.z.assign( select( changed, rd.y, ad.z ) );
 		ad.y.assign( select( changed, float( 0 ), min( ad.y.add( u.dt.mul( 4 ) ), 1 ) ) ); ad.w.assign( float( i ) );
-		rd.y.assign( rd.y.add( select( state.equal( 1 ), speed.mul( u.dt ).mul( 4.8 ), select( state.equal( 2 ), speed.mul( u.dt ).mul( 3.2 ), u.dt.mul( .5 ) ) ) ).mod( TAU ) );
+		rd.y.assign( rd.y.add( select( u.behaviour.equal( 5 ).and( i.greaterThan( 0 ) ), float( 0 ), select( state.equal( 1 ), speed.mul( u.dt ).mul( 4.8 ), select( state.equal( 2 ), speed.mul( u.dt ).mul( 3.2 ), u.dt.mul( 2.5 ) ) ) ) ).mod( TAU ) );
 		const quantized = floor( fract( heading.div( TAU ) ).mul( 256 ) ).mod( 256 );
 		rd.w.assign( state.add( quantized.mul( 8 ) ).add( seed.mul( 2048 ) ) ); sd.w.assign( heading );
 		render.element( i ).assign( rd ); sim.element( i ).assign( sd ); anim.element( i ).assign( ad );

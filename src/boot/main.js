@@ -81,8 +81,9 @@ try {
 		}
 
 	} );
-	if ( document.body.dataset.bootMode === 'city' ) await boot.launch( 'stress', gpu );
-	else if ( document.body.dataset.bootMode === 'classic' ) await boot.launch( 'classic', gpu );
+	const requested = new URLSearchParams( location.search ).get( 'engine' );
+	const mode = requested || ( document.body.dataset.bootMode === 'city' ? 'stress' : document.body.dataset.bootMode );
+	if ( [ 'game', 'stress', 'classic' ].includes( mode ) ) await boot.launch( mode, gpu );
 	else boot.choose( gpu );
 
 } catch ( error ) {

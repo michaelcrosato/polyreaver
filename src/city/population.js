@@ -31,9 +31,9 @@ function gcd( a, b ) {
 
 }
 
-export function assignPopulation( city, count ) {
+export function assignPopulation( city, count, allocation = 0 ) {
 
-	const capacity = 2 ** Math.ceil( Math.log2( Math.max( 64, count + 1 ) ) );
+	const capacity = Math.max( allocation, 2 ** Math.ceil( Math.log2( Math.max( 64, count + 1 ) ) ) );
 	const homes = prefix( city.buildings, ( b ) => b.homeCapacity );
 	const jobs = prefix( city.buildings, ( b ) => b.jobCapacity );
 	if ( homes.total < count || jobs.total < count ) throw new Error( `Insufficient capacity: homes ${homes.total}, activities ${jobs.total}, citizens ${count}` );

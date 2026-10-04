@@ -12,6 +12,8 @@ import { CityTraffic } from './traffic.js';
 import { cityConfig } from './config.js';
 import { generateCityAsync } from './generate.js';
 import { validateCity } from './validate.js';
+import { initOptions, attachOptions } from './options.js';
+import { assignPopulation } from './population.js';
 import { referenceRoute } from './navigation.js';
 
 const $ = ( id ) => document.getElementById( id );
@@ -41,9 +43,10 @@ class CityApp {
 		this.labelPoint = new THREE.Vector3(); this.districtLabels = [];
 		this.marker = new THREE.Mesh( new THREE.RingGeometry( .5, .8, 12 ).rotateX( - Math.PI / 2 ), new THREE.MeshBasicNodeMaterial( { color: 0xffdc76, depthTest: false } ) ); this.marker.renderOrder = 5; this.scene.add( this.marker );
 		this.routeLine = null;
+		initOptions( this );
 		this.bind();
 		const hash = new URLSearchParams( location.hash.slice( 1 ) );
-		this.config = cityConfig( { seed: hash.get( 'seed' ) || 'harbor-100k', population: Number( hash.get( 'population' ) || 100000 ) } );
+		this.config = cityConfig( { seed: hash.get( 'seed' ) || 'harbor-100k', population: Number( hash.get( 'population' ) || this.S.count ) } );
 		this.paused = hash.get( 'paused' ) === '1';
 		await boot.step( 'WORLD', 'Generating city and citizens', 70, () => this.regenerate( this.config ), 120000 );
 		this.lastFrame = performance.now(); this.lastHud = 0; this.lastTrafficTime = 0;
@@ -56,6 +59,28 @@ class CityApp {
 
 	bind() {
 
+		for ( const tab of [ 'city', 'options' ] ) document.getElementById( tab + '-tab' ).onclick = () => {
+
+			for ( const id of [ 'city', 'options' ] ) {
+
+				document.getElementById( id + '-controls' ).hidden = id !== tab;
+				document.getElementById( id + '-tab' ).setAttribute( 'aria-selected', String( id === tab ) );
+
+			}
+
+		};
+
+		for ( const tab of [ 'city', 'options' ] ) document.getElementById( tab + '-tab' ).onkeydown = ( event ) => {
+
+			if ( [ 'ArrowLeft', 'ArrowRight', 'Home', 'End' ].includes( event.key ) ) {
+
+				event.preventDefault();
+				const next = event.key === 'Home' ? 'city' : event.key === 'End' ? 'options' : tab === 'city' ? 'options' : 'city';
+				const button = document.getElementById( next + '-tab' ); button.click(); button.focus();
+
+			}
+
+		};
 		for ( const mode of CAMERA_MODES ) { const option = document.createElement( 'option' ); option.value = mode.id; option.textContent = mode.label; $( 'camera' ).appendChild( option ); }
 		$( 'camera' ).onchange = () => this.cameraMode( $( 'camera' ).value );
 		$( 'regenerate' ).onclick = () => this.regenerate( { seed: $( 'seed' ).value, population: Number( $( 'population' ).value ) } ).catch( ( e ) => this.fail( e ) );
@@ -63,7 +88,7 @@ class CityApp {
 		$( 'pause' ).onclick = () => this.pause( ! this.paused );
 		$( 'overview' ).onclick = () => this.overview();
 		$( 'recenter' ).onclick = () => { this.rig.setBenchView( null ); this.rig.recenter(); this.rig.viewHeightTarget = 130; };
-		$( 'quality' ).onchange = () => this.crowd?.set( { tier: Number( $( 'quality' ).value ) } );
+		$( 'quality' ).onchange = () => this.set( 'tier', Number( $( 'quality' ).value ) ).catch( ( e ) => this.ui.setWarnings( [ e.message ] ) );
 		$( 'panel-toggle' ).onclick = () => $( 'panel' ).classList.toggle( 'collapsed' );
 		$( 'report' ).onclick = async () => {
 
@@ -93,7 +118,7 @@ class CityApp {
 			if ( hit ) this.selectBuilding( hit.object.userData.buildings[ hit.instanceId ].id );
 
 		} );
-		window.addEventListener( 'resize', () => { if ( ! this.benchmarking ) { this.renderer.setSize( innerWidth, innerHeight ); this.rig.setAspect( innerWidth / innerHeight ); } } );
+		window.addEventListener( 'resize', () => { if ( ! this.benchmarking ) this.resize(); } );
 		document.addEventListener( 'visibilitychange', () => { this.lastFrame = performance.now(); if ( this.profile ) this.profile.accumulator = 0; } );
 		$( 'minimap' ).onclick = () => this.overview();
 
@@ -146,6 +171,7 @@ class CityApp {
 		$( 'status' ).textContent = 'Generating city…';
 		const city = await this.generate( config, id );
 		if ( id !== this.generation ) return;
+		if ( this.S.capacity !== 'auto' ) city.population = assignPopulation( city, config.population, Math.min( this.maxBufferCapacity, Math.max( Number( this.S.capacity ), city.population.capacity ) ) );
 		const staging = new THREE.Scene(), profile = new CityCrowdProfile( city );
 		let world, crowd, traffic;
 		try {
@@ -156,11 +182,13 @@ class CityApp {
 			traffic = new CityTraffic( city, staging );
 
 		} catch ( e ) { crowd?.dispose(); world?.dispose(); traffic?.dispose(); throw e; }
+		this.physics?.dispose(); this.physicsStartup = null;
 		this.crowd?.dispose(); this.world?.dispose(); this.traffic?.dispose(); this.clearRoute();
 		for ( const child of [ ...staging.children ] ) this.scene.add( child ); world.scene = crowd.scene = traffic.scene = this.scene;
 		this.data = city; this.world = world; this.profile = profile; this.crowd = crowd; this.traffic = traffic; this.collision = new CityCollision( city ); this.config = config;
 		this.hero.pos.set( city.heroSpawn.x, 0, city.heroSpawn.z ); this.rig.focus.copy( this.hero.pos ); this.rig.recenter(); this.rig.setBenchView( null );
 		profile.paused = this.paused;
+		await attachOptions( this );
 		this.generationMs = performance.now() - start;
 		$( 'seed' ).value = config.seed; $( 'population' ).value = String( config.population );
 		if ( ! [ ...$( 'population' ).options ].some( ( o ) => Number( o.value ) === config.population ) ) {
@@ -182,12 +210,12 @@ class CityApp {
 		$( 'district-labels' ).replaceChildren( ...this.districtLabels.map( ( d ) => d.label ) );
 		document.title = `Polyreaver City · ${config.population.toLocaleString()} citizens`;
 		$( 'selection' ).textContent = 'Click a building to inspect its address and capacities.';
-		location.hash = new URLSearchParams( { seed: config.seed, population: String( config.population ) } ).toString();
+		location.hash = new URL( this.shareLink() ).hash;
 		return this.describe();
 
 	}
 
-	cameraMode( id ) { this.rig.setBenchView( null ); this.rig.setMode( id ); $( 'camera' ).value = id; }
+	cameraMode( id ) { this.rig.setBenchView( null ); this.rig.setMode( id ); $( 'camera' ).value = id; if ( this.S ) this.S.camera = id; if ( this._optionsReady ) this.post.build( this.S, this.rig.camera ); }
 	overview() { this.rig.setMode( 'iso' ); this.rig.setBenchView( () => 1450 ); $( 'camera' ).value = 'iso'; }
 	pause( value ) { this.paused = !! value; if ( this.profile ) { this.profile.paused = this.paused; this.profile.accumulator = 0; } $( 'pause' ).textContent = this.paused ? 'Resume city' : 'Pause city'; return this.paused; }
 
@@ -216,7 +244,9 @@ class CityApp {
 
 			this.rig.setBenchView( null ); this.rig.follow = true;
 			this.hero.heading = Math.atan2( this.tmpMove.x, this.tmpMove.z );
+			const before = this.hero.pos.clone();
 			this.collision.move( this.hero.pos, Math.sin( this.hero.heading ) * this.hero.speed * dt, Math.cos( this.hero.heading ) * this.hero.speed * dt );
+			if ( this.physics?.enabled ) { const delta = this.hero.pos.clone().sub( before ); this.hero.pos.copy( before ); this.physics.moveHero( this.hero.pos, delta ); }
 
 		}
 		this.crowd.u.heroPos.value.set( this.hero.pos.x, this.hero.pos.z ); this.crowd.u.heroHeading.value = this.hero.heading; this.crowd.u.heroState.value = this.hero.state;
@@ -242,11 +272,18 @@ class CityApp {
 			this.crowd.update( dt, this.profile.simTime, this.rig.camera, this.renderer.domElement.height );
 			const trafficDt = this.profile.simTime - this.lastTrafficTime; this.lastTrafficTime = this.profile.simTime;
 			this.traffic.update( Math.max( 0, trafficDt ), this.profile.simTime, this.paused );
-			this.renderer.render( this.scene, this.rig.camera ); this.frameCount ++;
+			this.physics?.update( Math.min( dt, .1 ), this.hero.pos, this.hero.heading );
+			this.environment.update( dt, this.rig.focus, this.rig.camera, this.rig.viewExtent );
+			const focus = this.hero.pos.clone().add( new THREE.Vector3( 0, 1.2, 0 ) ).sub( this.rig.camera.position ).dot( this.rig.camera.getWorldDirection( this.tmpForward ) );
+			this.post.u.focus.value = focus; this.post.u.focalLength.value = this.rig.isOrtho ? this.rig.viewHeight * .3 : Math.max( 3, focus * .5 );
+			this.bench.ballast.update();
+			if ( this.post.active ) this.post.render(); else this.renderer.render( this.scene, this.rig.camera );
+			this.frameCount ++;
 			this.drawDistrictLabels();
 			const gpuRenderMs = this.gpu.timestamps ? this.renderer.info.render.timestamp || null : null;
 			const gpuComputeMs = this.gpu.timestamps ? this.renderer.info.compute.timestamp || null : null;
 			const sample = { frameMs: ms, cpuMs: performance.now() - start, gpuMs: gpuRenderMs !== null && gpuComputeMs !== null ? gpuRenderMs + gpuComputeMs : null, gpuRenderMs, gpuComputeMs };
+			this.bench.onFrame( ms, sample.gpuMs || 0, sample.cpuMs );
 			this.samples.push( sample ); if ( this.samples.length > 18000 ) this.samples.shift();
 			if ( this.gpu.timestamps && this.frameCount % 4 === 0 ) {
 
@@ -307,7 +344,7 @@ class CityApp {
 		const stats = this.crowd.stats(), world = this.world.stats( this.rig.camera );
 		const memory = this.renderer.info.memory;
 		const gpuDataBytes = ( memory.attributesSize || 0 ) + ( memory.indexAttributesSize || 0 ) + ( memory.indirectStorageAttributesSize || 0 ) + ( memory.storageAttributesSize || 0 ) + this.data.surface.data.byteLength;
-		return { ready: true, version: this.data.version, seed: this.config.seed, layoutHash: this.data.layoutHash, config: this.config, citizens: this.data.population.count, activeAgents: this.crowd.count, capacity: this.crowd.capacity, buildings: this.data.buildings.length, services: this.data.serviceSites, generationMs: this.generationMs, generationMode: this.generationMode, validation: this.data.validation, ticks: this.profile.ticks, simTime: this.profile.simTime, droppedSimulationSeconds: this.profile.droppedSeconds, paused: this.paused, visibleByTier: stats.visibleByTier, crowdTriangles: stats.tris, staticTriangles: world.triangles, totalStaticTriangles: world.totalTriangles, trafficTriangles: this.traffic.triangles, gpuDataBytes, gpuDataBudgetBytes: this.profile.bytes + stats.cullBytes + this.world.bytes + this.traffic.bytes, rendererMemory: { ...memory }, renderTargetBytesEstimate: this.renderer.domElement.width * this.renderer.domElement.height * 8, draws: this.renderer.info.render.drawCalls, resolution: [ this.renderer.domElement.width, this.renderer.domElement.height ], adapter: this.gpu.info, timestamps: this.gpu.timestamps, frameCount: this.frameCount, errors: this.errors, diagnostics: this.diagnostics || [], hero: { x: this.hero.pos.x, z: this.hero.pos.z }, selected: this.selected };
+		return { ready: true, version: this.data.version, seed: this.config.seed, layoutHash: this.data.layoutHash, config: this.config, citizens: this.data.population.count, activeAgents: this.crowd.count, capacity: this.crowd.capacity, buildings: this.data.buildings.length, services: this.data.serviceSites, generationMs: this.generationMs, generationMode: this.generationMode, validation: this.data.validation, ticks: this.profile.ticks, simTime: this.profile.simTime, droppedSimulationSeconds: this.profile.droppedSeconds, paused: this.paused, visibleByTier: stats.visibleByTier, crowdTriangles: stats.tris, staticTriangles: world.triangles, totalStaticTriangles: world.totalTriangles, trafficTriangles: this.traffic.triangles, gpuDataBytes, gpuDataBudgetBytes: this.profile.bytes + stats.cullBytes + this.world.bytes + this.traffic.bytes, rendererMemory: { ...memory }, renderTargetBytesEstimate: this.renderer.domElement.width * this.renderer.domElement.height * 8, draws: this.renderer.info.render.drawCalls, resolution: [ this.renderer.domElement.width, this.renderer.domElement.height ], adapter: this.gpu.info, timestamps: this.gpu.timestamps, frameCount: this.frameCount, errors: this.errors, settings: { ...this.S }, physics: this.physics?.stats(), diagnostics: this.diagnostics || [], hero: { x: this.hero.pos.x, z: this.hero.pos.z }, selected: this.selected };
 
 	}
 
@@ -320,6 +357,18 @@ class CityApp {
 		$( 'fps' ).textContent = `${( 1000 / frame ).toFixed( 0 )} fps`;
 		$( 'hud-detail' ).textContent = `${district}\n${d.citizens.toLocaleString()} citizens + player\n${d.visibleByTier.reduce( ( a, b ) => a + b, 0 ).toLocaleString()} visible · ${d.ticks} simulation ticks\n${frame.toFixed( 1 )} ms frame · ${cpu.toFixed( 1 )} ms CPU\n${Math.round( d.crowdTriangles + d.staticTriangles + d.trafficTriangles ).toLocaleString()} triangles · ${d.draws} draws\n${( d.gpuDataBytes / 1048576 ).toFixed( 1 )} MiB GPU data · ${( this.diagnostics?.[ 0 ] || 0 )} bucket overflow`;
 		this.drawPlayerMap();
+		if ( [ 1, 2 ].includes( this.S.behaviour ) ) {
+
+			let near = Infinity, far = - 1;
+			for ( const a of this.data.addresses ) {
+
+				const d = ( a.x - this.hero.pos.x ) ** 2 + ( a.z - this.hero.pos.z ) ** 2;
+				if ( d < near ) { near = d; this.profile.heroAddress.value = a.id; }
+				if ( d > far ) { far = d; this.profile.fleeAddress.value = a.id; }
+
+			}
+
+		}
 
 	}
 
@@ -469,19 +518,20 @@ class CityApp {
 
 	async benchmark( { seconds = 60, warmup = 10 } = {} ) {
 
-		if ( this.benchmarking ) throw new Error( 'A city benchmark is already running' );
+		if ( this.benchmarking || this.bench.running ) throw new Error( 'A benchmark is already running' );
 		if ( ! Number.isFinite( seconds ) || seconds < 1 || seconds > 300 || ! Number.isFinite( warmup ) || warmup < 0 || warmup > 60 ) throw new Error( 'Benchmark duration must be 1–300 seconds and warmup 0–60 seconds.' );
 		if ( this.config.population !== 100000 ) throw new Error( 'Select 100,000 citizens before running the standard city benchmark.' );
+		this.cancelBenchmark = false;
 		this.benchmarking = true;
 		const original = { hero: this.hero.pos.clone(), heading: this.hero.heading, mode: this.rig.mode, height: this.rig.viewHeightTarget, paused: this.paused, width: this.renderer.domElement.width, canvasHeight: this.renderer.domElement.height, tier: this.crowd.tier, simTime: this.profile.simTime, ticks: this.profile.ticks, dropped: this.profile.droppedSeconds };
 		const trafficState = this.traffic.states.map( ( s ) => ( { ...s, previous: s.previous.clone(), current: s.current.clone() } ) ), trafficAccumulator = this.traffic.accumulator;
 		const signalColors = this.traffic.signalMesh.instanceColor.array.slice();
 		this.pause( true );
 		const originalPopulation = await this.capturePopulation();
-		this.pause( false ); this.renderer.setSize( 1920, 1080, false ); this.rig.setAspect( 1920 / 1080 );
-		this.crowd.set( { tier: 1 } ); $( 'quality' ).value = '1';
+		this.pause( false ); this.renderer.setPixelRatio( 1 ); this.renderer.setSize( 1920, 1080, false ); this.post.onResize(); this.rig.setAspect( 1920 / 1080 );
+		this.crowd.set( { tier: 1 } ); $( 'quality' ).value = '0';
 		for ( const id of [ 'seed', 'regenerate', 'population', 'quality', 'camera', 'overview', 'recenter', 'pause', 'benchmark' ] ) $( id ).disabled = true;
-		const report = { version: 1, adapter: this.gpu.info, hardware: ! this.gpu.info.isFallbackAdapter, resolution: [ 1920, 1080 ], seed: this.config.seed, citizens: 100000, warmupSeconds: warmup, measurementSeconds: seconds, scenarios: [] };
+		const report = { version: 1, adapter: this.gpu.info, hardware: ! this.gpu.info.isFallbackAdapter, resolution: [ 1920, 1080 ], settings: { ...this.S, tier: 0 }, seed: this.config.seed, citizens: 100000, warmupSeconds: warmup, measurementSeconds: seconds, scenarios: [] };
 		try {
 
 			for ( const scenario of [ 'square', 'downtown', 'whole-city', 'traversal' ] ) {
@@ -513,6 +563,7 @@ class CityApp {
 					const poll = () => {
 
 						if ( this.frameCount >= prepareFrame + 2 ) resolve();
+						else if ( this.cancelBenchmark ) reject( new Error( 'City benchmark stopped.' ) );
 						else if ( performance.now() > deadline || this.errors.length ) reject( new Error( 'City benchmark could not prepare rendered frames.' ) );
 						else setTimeout( poll, 50 );
 
@@ -526,7 +577,8 @@ class CityApp {
 
 					const poll = () => {
 
-						if ( document.hidden ) reject( new Error( 'Keep the benchmark tab in the foreground.' ) );
+						if ( this.cancelBenchmark ) reject( new Error( 'City benchmark stopped.' ) );
+						else if ( document.hidden ) reject( new Error( 'Keep the benchmark tab in the foreground.' ) );
 						else if ( performance.now() - measureStart >= seconds * 1000 && this.samples.length ) resolve();
 						else if ( performance.now() - measureStart > seconds * 1000 + 15000 ) reject( new Error( 'No frames were produced during measurement.' ) );
 						else setTimeout( poll, 50 );
@@ -553,10 +605,10 @@ class CityApp {
 			this.traffic.states = trafficState; this.traffic.accumulator = trafficAccumulator; this.traffic.signalMesh.instanceColor.array.set( signalColors ); this.traffic.signalMesh.instanceColor.needsUpdate = true;
 			this.profile.simTime = original.simTime; this.profile.ticks = original.ticks; this.profile.droppedSeconds = original.dropped; this.lastTrafficTime = original.simTime;
 			this.cameraMode( original.mode ); this.rig.viewHeightTarget = original.height; this.pause( original.paused );
-			this.crowd.set( { tier: original.tier } ); $( 'quality' ).value = String( original.tier );
+			this.crowd.set( { tier: original.tier } ); $( 'quality' ).value = String( this.S.tier );
 			for ( const id of [ 'seed', 'regenerate', 'population', 'quality', 'camera', 'overview', 'recenter', 'pause', 'benchmark' ] ) $( id ).disabled = false;
-			this.renderer.setSize( original.width, original.canvasHeight, false ); this.rig.setAspect( original.width / original.canvasHeight );
-			$( 'status' ).textContent = 'City benchmark finished';
+			this.resize();
+			$( 'status' ).textContent = this.cancelBenchmark ? 'City benchmark stopped' : 'City benchmark finished';
 
 		}
 

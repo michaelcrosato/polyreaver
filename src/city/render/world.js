@@ -1,7 +1,9 @@
 // Static city: one building batch and one colored prop batch per 256 m chunk.
 // Facades and surface patterns are shader detail, never individual window meshes.
 import * as THREE from 'three/webgpu';
-import { attribute, normalLocal, positionWorld, uv, vec3, float, texture, mix, fract, step, dot, max, smoothstep, fwidth, abs } from 'three/tsl';
+import { attribute, normalLocal, positionWorld, uv, vec3, float, texture, mix, fract, step, dot, max, smoothstep, fwidth, abs, uniform } from 'three/tsl';
+import { World } from '../../world.js';
+import { makeMaterial } from '../../world/materials.js';
 import { boxGeometry, pyramidGeometry, mergedGeometry } from './geometry.js';
 
 const PALETTES = {
@@ -27,7 +29,7 @@ function buildingMaterial() {
 
 }
 
-function groundMaterial( atlas ) {
+function groundMaterial( atlas, detail ) {
 
 	const m = new THREE.MeshBasicNodeMaterial();
 	const sample = texture( atlas, positionWorld.xz.add( 1024 ).div( 2048 ) );
@@ -35,7 +37,7 @@ function groundMaterial( atlas ) {
 	let c = vec3( .28, .37, .3 );
 	for ( const [ id, col ] of [ [ 1, [ .16, .19, .21 ] ], [ 2, [ .61, .62, .56 ] ], [ 3, [ .29, .46, .3 ] ], [ 4, [ .15, .36, .44 ] ], [ 5, [ .46, .48, .45 ] ], [ 6, [ .73, .66, .52 ] ], [ 7, [ .3, .33, .32 ] ], [ 8, [ .4, .43, .4 ] ], [ 9, [ .47, .45, .39 ] ] ] ) c = mix( c, vec3( ...col ), kind.equal( id ) );
 	const paving = step( .965, fract( positionWorld.x.mul( .5 ) ) ).max( step( .965, fract( positionWorld.z.mul( .5 ) ) ) );
-	c = c.mul( float( 1 ).sub( paving.mul( .08 ).mul( kind.equal( 2 ).or( kind.equal( 6 ) ) ) ) );
+	c = c.mul( float( 1 ).sub( paving.mul( detail ).mul( .08 ).mul( kind.equal( 2 ).or( kind.equal( 6 ) ) ) ) );
 	const parking = step( .94, fract( positionWorld.x.div( 3 ) ) ).mul( kind.equal( 7 ) );
 	m.colorNode = mix( c, vec3( .73, .72, .62 ), parking );
 	return m;
@@ -52,7 +54,9 @@ export class CityWorld {
 		this.box = boxGeometry(); this.pyramid = pyramidGeometry(); this.geometries.add( this.box ); this.geometries.add( this.pyramid );
 		this.atlas = new THREE.DataTexture( city.surface.data, 1024, 1024, THREE.RGBAFormat );
 		this.atlas.magFilter = this.atlas.minFilter = THREE.NearestFilter; this.atlas.needsUpdate = true;
-		const ground = groundMaterial( this.atlas ); this.materials.add( ground );
+		this.groundDetail = uniform( 1 ); this.groundWet = uniform( 0 );
+		const ground = groundMaterial( this.atlas, this.groundDetail );
+		ground.userData.cityGround = true; this.materials.add( ground );
 		const plane = ( x0, z0, x1, z1, y ) => {
 
 			const geometry = new THREE.PlaneGeometry( x1 - x0, z1 - z0 ).rotateX( - Math.PI / 2 );
@@ -74,7 +78,7 @@ export class CityWorld {
 		const key = ( x, z ) => `${Math.floor( ( x + 1024 ) / 256 )},${Math.floor( ( z + 1024 ) / 256 )}`;
 		const append = ( map, k, value ) => { if ( ! map.has( k ) ) map.set( k, [] ); map.get( k ).push( value ); };
 		for ( const b of city.buildings ) append( buildings, key( ( b.x0 + b.x1 ) / 2, ( b.z0 + b.z1 ) / 2 ), b );
-		for ( const p of city.props ) append( props, key( p.x, p.z ), p );
+		for ( const p of city.props ) if ( ! [ 'tree', 'lamp' ].includes( p.type ) ) append( props, key( p.x, p.z ), p );
 		for ( const b of city.buildings ) if ( b.landmark ) append( props, key( ( b.x0 + b.x1 ) / 2, ( b.z0 + b.z1 ) / 2 ), { type: 'landmark-cap', x: ( b.x0 + b.x1 ) / 2, z: ( b.z0 + b.z1 ) / 2, y: b.height, sx: ( b.x1 - b.x0 ) * .65, sz: ( b.z1 - b.z0 ) * .65 } );
 		const bm = buildingMaterial(); this.materials.add( bm );
 		const matrix = new THREE.Matrix4(), color = new THREE.Color();
@@ -124,6 +128,17 @@ export class CityWorld {
 			const mesh = new THREE.Mesh( mergedGeometry( parts ), pm ); mesh.name = `City props ${k}`; this.add( mesh );
 
 		}
+		this.propsOn = true; this.radius = 1450;
+		for ( const [ type, geo, meshKey, pointKey ] of [ [ 'tree', mergedGeometry( [ { x: 0, z: 0, geometry: this.box, sx: .3, sy: 1.8, sz: .3, color: 0x7a6951 }, { x: 0, z: 0, geometry: this.pyramid, y: 1.4, sx: 1.3, sy: 3.6, sz: 1.3, color: 0x567c50 } ] ), 'trees', 'treePts' ], [ 'lamp', mergedGeometry( [ { x: 0, z: 0, geometry: this.box, sx: .13, sy: 4, sz: .13, color: 0x657478 }, { x: 0, z: 0, geometry: this.box, y: 4, sx: .55, sy: .17, sz: .4, color: 0xe5d99d } ] ), 'lamps', 'lampPts' ] ] ) {
+
+			const points = city.props.filter( ( p ) => p.type === type ).map( ( p ) => ( { x: p.x, z: p.z, rot: 0, s: type === 'tree' ? p.height / 5 : 1 } ) );
+			const material = new THREE.MeshBasicNodeMaterial( { vertexColors: true } ); this.materials.add( material );
+			const mesh = new THREE.InstancedMesh( geo, material, points.length ); mesh.name = `City props ${type}`;
+			this[ meshKey ] = mesh; this[ pointKey ] = points; this.add( mesh );
+
+		}
+		this.resetPropMatrices();
+		this.trees.computeBoundingSphere(); this.lamps.computeBoundingSphere();
 		this.addMarkings();
 		this.staticTriangles = this.meshes.reduce( ( sum, m ) => sum + ( m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count ) / 3 * ( m.isInstancedMesh ? m.count : 1 ), 0 );
 		this.bytes = city.surface.data.byteLength + this.meshes.reduce( ( n, m ) => n + Object.values( m.geometry.attributes ).reduce( ( sum, a ) => sum + a.array.byteLength, 0 ) + ( m.instanceMatrix?.array.byteLength || 0 ) + ( m.instanceColor?.array.byteLength || 0 ), 0 );
@@ -172,11 +187,50 @@ export class CityWorld {
 
 	}
 
+	setShading( kind ) {
+
+		if ( this.kind === kind ) return;
+		this.kind = kind;
+		const replacements = new Map();
+		for ( const old of this.materials ) {
+
+			const material = makeMaterial( kind, { color: old.color, vertexColors: old.vertexColors, side: old.side } );
+			material.colorNode = old.colorNode;
+			material.name = old.name;
+			material.userData = { ...old.userData };
+			if ( old.userData.cityGround && material.isMeshStandardNodeMaterial ) {
+
+				material.roughnessNode = mix( float( .85 ), float( .12 ), this.groundWet );
+				material.metalnessNode = mix( float( 0 ), float( .35 ), this.groundWet );
+
+			}
+			replacements.set( old, material );
+
+		}
+		for ( const mesh of this.meshes ) mesh.material = replacements.get( mesh.material );
+		for ( const old of this.materials ) old.dispose();
+		this.materials = new Set( replacements.values() );
+
+	}
+
+	resetPropMatrices() { World.prototype.resetPropMatrices.call( this ); }
+
+	setProps( on ) {
+
+		this.propsOn = on;
+
+		for ( const mesh of this.meshes ) if ( mesh.name.startsWith( 'City props' ) ) mesh.visible = on;
+
+	}
+
+	setGroundDetail( on ) { this.groundDetail.value = on ? 1 : 0; }
+	setWet( on ) { this.groundWet.value = on ? 1 : 0; }
+
 	stats( camera ) {
 
 		const frustum = new THREE.Frustum().setFromProjectionMatrix( new THREE.Matrix4().multiplyMatrices( camera.projectionMatrix, camera.matrixWorldInverse ), THREE.WebGPUCoordinateSystem );
 		let triangles = 0, draws = 0;
-		for ( const m of this.meshes ) if ( frustum.intersectsObject( m ) ) {
+		for ( const m of this.meshes ) if ( m.visible && frustum.intersectsObject( m ) ) {
 
 			triangles += ( m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count ) / 3 * ( m.isInstancedMesh ? m.count : 1 ); draws ++;
 
