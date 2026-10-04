@@ -220,8 +220,21 @@ export class Crowd {
 
 	setCount( n ) {
 
-		this.count = Math.max( 1, Math.min( Math.floor( n ), this.capacity ) );
+		const count = Math.max( 1, Math.min( Math.floor( n ), this.capacity ) );
+		if ( this.citySurface && count !== this.count ) this._needsInit = true;
+		this.count = count;
 		this._applyCount();
+
+	}
+
+	setCitySurface( texture, origin ) {
+
+		const old = this.citySurface;
+		this.citySurface = texture;
+		this.cityOrigin = texture ? uniform( new THREE.Vector2( origin.x, origin.z ) ) : null;
+		this._buildComputes();
+		this._needsInit = true;
+		old?.dispose();
 
 	}
 
@@ -331,13 +344,26 @@ export class Crowd {
 		u.count.value = this.count;
 		u.rapierCount.value = this.rapierAgents > 0 ? Math.min( this.rapierAgents + 1, this.count ) : 0;
 
+		if ( this.path === 'gpu' ) this._updateCullUniforms( camera, viewportHeight );
+		this.renderer.compute( this._activeComputes() );
+		this._needsInit = false;
+		if ( this.collider ) this.collider.u.blast.value.w = 0; // explosion is a one-frame pulse
+		if ( this.path === 'gpu' ) this._maybeReadback();
+
+	}
+
+	// Compile exactly the kernels the frame loop will dispatch, without running
+	// simulation or consuming its pending initialization.
+	prepare() {
+
+		return this.renderer.compileComputeAsync( this._activeComputes() );
+
+	}
+
+	_activeComputes() {
+
 		const computes = [];
-		if ( this._needsInit ) {
-
-			computes.push( this.initCompute );
-			this._needsInit = false;
-
-		}
+		if ( this._needsInit ) computes.push( this.initCompute );
 
 		if ( this.collide && this.collider ) {
 
@@ -366,7 +392,6 @@ export class Crowd {
 
 		if ( this.path === 'gpu' ) {
 
-			this._updateCullUniforms( camera, viewportHeight );
 			computes.push( this.resetCompute );
 			const used = ( list ) => ( this.tier >= 2 ? list : list.slice( 0, 1 ) );
 			const passes = used( this.cullPasses );
@@ -381,9 +406,7 @@ export class Crowd {
 
 		}
 
-		this.renderer.compute( computes );
-		if ( this.collider ) this.collider.u.blast.value.w = 0; // explosion is a one-frame pulse
-		if ( this.path === 'gpu' ) this._maybeReadback();
+		return computes;
 
 	}
 
@@ -523,6 +546,7 @@ export class Crowd {
 		this._disposeMeshes();
 		this._freeStorage();
 		this.scene.remove( this.group );
+		this.citySurface?.dispose();
 
 	}
 

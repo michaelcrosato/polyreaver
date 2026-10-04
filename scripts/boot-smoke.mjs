@@ -27,18 +27,11 @@ const ready = ( page ) => page.waitForFunction( () => [ 'ready', 'failed' ].incl
 const fail = ( page ) => page.waitForFunction( () => window.__boot?.status === 'failed', null, { timeout: 40000 } );
 async function cityReady( page ) {
 
-	await page.waitForFunction( () => window.__fatal || window.__boot?.status === 'running' && window.city?.frameCount > 2, null, { timeout: 180000 } );
+	await page.waitForFunction( () => window.__fatal || window.__boot?.status === 'running' && window.app?.frameCount > 2, null, { timeout: 180000 } );
 	assert.equal( await page.evaluate( () => window.__fatal || window.__boot.mode ), 'stress' );
-	const city = await page.evaluate( () => ( {
-		population: window.city.config.population, active: window.city.crowd.count,
-		buildings: window.city.data.buildings.length, districts: window.city.data.districts.length,
-		routes: window.city.data.graph.edges.length, classicLoaded: !! window.app?.renderer
-	} ) );
-	assert.equal( city.population, 100000 );
-	assert.equal( city.active, 100001 );
-	assert.ok( city.buildings > 3000 && city.districts >= 16 && city.routes > 1000 );
-	assert.equal( city.classicLoaded, false );
-	for ( const id of [ 'regenerate', 'overview', 'benchmark' ] ) assert.equal( await page.locator( '#' + id ).isEnabled(), true );
+	const state = await page.evaluate( () => ( { scene: window.app.S.scene, count: window.app.crowd.count, buildings: window.app.world.city?.buildings.length, separate: !! window.city } ) );
+	assert.equal( state.scene, 'city' ); assert.equal( state.count, 20000 ); assert.ok( state.buildings > 3000 ); assert.equal( state.separate, false );
+	assert.equal( await page.getByLabel( 'Scene', { exact: true } ).isEnabled(), true );
 
 }
 async function check( name, fn, options = {} ) {
@@ -72,7 +65,7 @@ try {
 
 		await page.goto( url ); await ready( page );
 		assert.equal( await page.evaluate( () => window.__boot.status ), 'ready' );
-		for ( const id of [ 'game', 'stress', 'classic' ] ) {
+		for ( const id of [ 'game', 'stress' ] ) {
 
 			const box = await page.locator( `[data-boot-choice="${id}"]` ).boundingBox();
 			assert.ok( box.width >= 44 && box.height >= 44 && box.x >= 0 && box.x + box.width <= 390 );
@@ -96,48 +89,60 @@ try {
 		await page.locator( `[data-boot-choice="${mode}"]` ).click();
 		await page.waitForFunction( () => [ 'running', 'failed' ].includes( window.__boot?.status ), null, { timeout: 180000 } );
 		assert.equal( await page.evaluate( () => window.__fatal || window.__boot.status ), 'running' );
-		await page.waitForFunction( ( mode ) => ( mode === 'game' ? window.game : window.city ).frameCount > 2, mode );
+		await page.waitForFunction( ( mode ) => ( mode === 'game' ? window.game : window.app ).frameCount > 2, mode );
 		if ( mode === 'stress' ) {
 
 			await cityReady( page );
-			await page.locator( '#overview' ).click();
-			await page.waitForFunction( () => ! document.getElementById( 'district-labels' ).hidden );
+			await page.getByRole( 'button', { name: 'City overview', exact: true } ).click();
 
 		}
 		assert.equal( await page.locator( '#boot' ).isVisible(), false );
+		// Exercise actual pointer input: a programmatic rig zoom does not click the
+		// canvas, whose Three.js data-engine metadata used to trigger navigation.
+		const beforeURL = page.url();
+		assert.equal( await page.locator( 'canvas[data-engine]' ).evaluate( ( canvas ) => canvas.onclick ), null );
+		await page.mouse.click( 300, 300 );
+		await page.mouse.move( 300, 300 ); await page.mouse.down();
+		const home = await page.locator( '#engine-home' ).boundingBox();
+		await page.mouse.move( home.x + home.width / 2, home.y + home.height / 2, { steps: 8 } );
+		await page.mouse.up();
+		await page.mouse.move( 300, 300 ); await page.mouse.wheel( 0, 600 ); await page.mouse.wheel( 0, -600 );
+		await page.waitForTimeout( 100 );
+		assert.equal( page.url(), beforeURL, 'map gestures must not navigate back to the chooser' );
+		assert.equal( await page.evaluate( () => window.__fatal || window.__boot.status ), 'running' );
+		assert.equal( await page.locator( '#boot' ).isVisible(), false );
 		assert.equal( requests.filter( ( x ) => x.includes( '/engines/' ) ).length, 1 );
-		assert.ok( requests.some( ( x ) => x.includes( `/engines/${mode === 'stress' ? 'city' : 'game'}-` ) ) );
+		assert.ok( requests.some( ( x ) => x.includes( `/engines/${mode === 'stress' ? 'stress' : 'game'}-` ) ) );
 		assert.deepEqual( errors, [] );
 		await page.screenshot( { path: `artifacts/boot/hosted-${mode}.png` } );
 		await page.evaluate( () => window.__device.destroy() ); await fail( page );
 		const loss = await page.evaluate( () => window.__boot.errors[ 0 ] );
-		// City diagnostics can have a pending readback: device destruction rejects
-		// mapAsync before device.lost resolves. Either first error must stop the loop.
-		assert.ok( loss.code === 'GPU-LOST' || mode === 'stress' && loss.code === 'CITY-ERR' && /GPUBuffer|GPU device lost/.test( loss.message ), JSON.stringify( loss ) );
-		const frames = await page.evaluate( ( mode ) => ( mode === 'game' ? window.game : window.city ).frameCount, mode );
+		assert.ok( loss.code === 'GPU-LOST', JSON.stringify( loss ) );
+		const frames = await page.evaluate( ( mode ) => ( mode === 'game' ? window.game : window.app ).frameCount, mode );
 		await page.waitForTimeout( 100 );
-		assert.equal( await page.evaluate( ( mode ) => ( mode === 'game' ? window.game : window.city ).frameCount, mode ), frames );
+		assert.equal( await page.evaluate( ( mode ) => ( mode === 'game' ? window.game : window.app ).frameCount, mode ), frames );
 
 	} );
-	if ( ! external ) await check( 'standalone Stress test opens full city offline; classic round trip', async ( page ) => {
+	if ( ! external ) await check( 'standalone unified stress test works offline; scene round trip', async ( page ) => {
 
-		// Both chooser downloads must contain the exact same engine payloads.
 		assert.deepEqual( readFileSync( 'polyreaver.html' ), readFileSync( 'webgpu-crowd-stress.html' ) );
+		const html = readFileSync( 'webgpu-crowd-stress.html', 'utf8' );
+		assert.equal( ( html.match( /id="boot-engine-/g ) || [] ).length, 2 );
 		await page.route( /^https?:/, ( route ) => route.abort() );
 		await page.goto( pathToFileURL( resolve( 'webgpu-crowd-stress.html' ) ).href ); await ready( page );
 		await page.locator( '[data-boot-choice="stress"]' ).click(); await cityReady( page );
-		await page.getByRole( 'link', { name: 'Classic crowd test', exact: true } ).click();
-		await page.waitForFunction( () => window.__fatal || window.__boot?.status === 'running' && window.app?.frameCount > 2, null, { timeout: 180000 } );
-		assert.equal( await page.evaluate( () => window.__fatal || window.__boot.mode ), 'classic' );
-		await page.getByRole( 'link', { name: 'Procedural city stress test', exact: true } ).click(); await cityReady( page );
+		await page.getByLabel( 'Scene', { exact: true } ).selectOption( 'plaza' ); await page.evaluate( () => window.app.sceneTask );
+		assert.equal( await page.evaluate( () => window.app.world.city ), null );
+		await page.getByLabel( 'Scene', { exact: true } ).selectOption( 'city' ); await page.evaluate( () => window.app.sceneTask ); await cityReady( page );
 
 	} );
-	await check( 'hosted classic crowd route remains available', async ( page ) => {
+	await check( 'legacy classic route starts the unified engine with the plaza', async ( page ) => {
 
 		await page.goto( new URL( 'classic-crowd.html#count=100', url ).href );
 		await page.waitForFunction( () => window.__fatal || window.__boot?.status === 'running' && window.app?.frameCount > 2, null, { timeout: 180000 } );
-		assert.equal( await page.evaluate( () => window.__fatal || window.__boot.mode ), 'classic' );
-		assert.equal( await page.getByRole( 'link', { name: 'Procedural city stress test', exact: true } ).getAttribute( 'href' ), './city-demo.html' );
+		assert.equal( await page.evaluate( () => window.__fatal || window.__boot.mode ), 'stress' );
+		assert.equal( await page.evaluate( () => window.app.S.scene ), 'plaza' );
+		assert.equal( await page.getByLabel( 'Scene', { exact: true } ).inputValue(), 'plaza' );
 
 	} );
 	// Fault injection proves that failure screens retain the original stage and

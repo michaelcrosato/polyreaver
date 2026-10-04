@@ -22,7 +22,7 @@ export function sweepBox( x, z, dx, dz, b, radius = 0.35 ) {
 
 export class CityCollision {
 
-	constructor( city ) {
+	constructor( city, { props = true } = {} ) {
 
 		this.city = city;
 		this.rectangles = [ ...city.buildings ];
@@ -36,7 +36,7 @@ export class CityCollision {
 
 		}
 		this.rectangles.push( { ...city.water, z0: z } );
-		for ( const p of city.props ) {
+		for ( const p of props ? city.props : [] ) {
 
 			const x = p.type === 'bench' ? .9 : p.type === 'parked-car' ? .85 : p.type === 'tree' ? .15 : p.type === 'lamp' ? .08 : p.type === 'signal-post' ? .05 : .25;
 			const z = p.type === 'bench' ? .3 : p.type === 'parked-car' ? 1.8 : x;

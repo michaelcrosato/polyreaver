@@ -21,6 +21,9 @@ export function applyCrowd( app ) {
 	const cap = app.resolveCapacity();
 	if ( cap !== crowd.capacity ) crowd.setCapacity( cap );
 	const u = crowd.u;
+	// The city's finite-map compression depends on count and density, so reset
+	// initial positions when the packing changes. All other controls keep state.
+	if ( crowd.citySurface && u.density.value !== S.density ) crowd._needsInit = true;
 	u.density.value = S.density;
 	u.activity.value = S.activity;
 	u.speedScale.value = S.speed;

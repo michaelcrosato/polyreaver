@@ -100,6 +100,7 @@ export class PostFX {
 		this.passes = 0;
 		this._pixelPass = null;
 		this._pixelMode = null;
+		this.scenePass = null;
 		if ( ! needsPost( S ) ) return warnings;
 
 		const renderer = this.renderer;
@@ -296,6 +297,7 @@ export class PostFX {
 		if ( S.vignette ) out = vec4( vignette( out.rgb, 0.5, 0.45 ), 1 );
 		if ( S.grain ) out = vec4( film( out, this.u.grain ).rgb, 1 );
 
+		this.scenePass = scenePass;
 		pipeline.outputNode = out;
 		this.pipeline = pipeline;
 		this.passes += 1;
@@ -386,6 +388,35 @@ export class PostFX {
 		}
 
 		return result;
+
+	}
+
+	// Compile with the same attachments and output settings as the scene pass.
+	// Compiling only the canvas path would miss MRT/MSAA pipelines used by post.
+	async prepareScene( camera, onProgress ) {
+
+		const renderer = this.renderer, pass = this.scenePass;
+		if ( ! this.active ) return renderer.compileAsync( this.scene, camera, null, onProgress );
+		const target = renderer.getRenderTarget(), mrt = renderer.getMRT();
+		const toneMapping = renderer.toneMapping, colorSpace = renderer.outputColorSpace;
+		try {
+
+			renderer.toneMapping = THREE.NoToneMapping;
+			renderer.outputColorSpace = THREE.ColorManagement.workingColorSpace;
+			pass.renderTarget.samples = pass.options.samples ?? renderer.samples;
+			pass.renderTarget.texture.type = renderer.getOutputBufferType();
+			renderer.setRenderTarget( pass.renderTarget );
+			renderer.setMRT( pass.getMRT() );
+			await renderer.compileAsync( this.scene, camera, null, onProgress );
+
+		} finally {
+
+			renderer.setRenderTarget( target );
+			renderer.setMRT( mrt );
+			renderer.toneMapping = toneMapping;
+			renderer.outputColorSpace = colorSpace;
+
+		}
 
 	}
 

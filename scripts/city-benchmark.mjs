@@ -9,7 +9,6 @@ import { execFileSync } from 'node:child_process';
 const args = process.argv.slice( 2 );
 const option = ( key, fallback ) => args.includes( key ) ? args[ args.indexOf( key ) + 1 ] : fallback;
 const software = args.includes( '--software' );
-const seconds = Number( option( '--seconds', 60 ) ), warmup = Number( option( '--warmup', 10 ) );
 const url = option( '--url', pathToFileURL( resolve( 'city-demo.html' ) ).href );
 const output = option( '--out', 'artifacts/city/benchmark.json' ); mkdirSync( resolve( output, '..' ), { recursive: true } );
 const flags = [ '--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPUService', '--ignore-gpu-blocklist' ];
@@ -22,31 +21,35 @@ page.on( 'console', ( message ) => { if ( message.type() === 'error' ) errors.pu
 
 try {
 
-	await page.goto( `${url}#population=100000` );
+	const target = new URL( url ); target.searchParams.set( 'engine', 'stress' ); target.hash = 'scene=city&count=100000';
+	await page.goto( target.href );
 	await page.bringToFront();
-	await page.waitForFunction( () => window.city || window.__fatal, null, { timeout: 90000 } );
+	await page.waitForFunction( () => window.app?.frameCount > 2 || window.__fatal, null, { timeout: 90000 } );
 	const fatal = await page.evaluate( () => window.__fatal || null );
 	if ( fatal ) throw new Error( fatal );
-	const adapter = await page.evaluate( () => window.city.gpu.info );
-	if ( adapter.isFallbackAdapter && ! software ) throw new Error( 'Only a software WebGPU adapter is available. Hardware performance remains unverified. Use Windows Chrome/Edge and the City Benchmark button, or --software to check reporting.' );
-	console.log( `City benchmark: ${seconds}s per scenario after ${warmup}s warmup. ${software ? 'Software correctness run; no performance claim.' : 'Hardware adapter run.'}` );
+	const adapter = await page.evaluate( () => window.app.gpu.info );
+	if ( adapter.isFallbackAdapter && ! software ) throw new Error( 'Only a software WebGPU adapter is available. Hardware performance remains unverified. Use Windows Chrome/Edge and the Standard benchmark button, or --software to check reporting.' );
+	console.log( `Unified city standard benchmark, fixed 1080p. ${software ? 'Software correctness run; no performance claim.' : 'Hardware adapter run.'}` );
 	const polling = setInterval( async () => {
 
-		console.log( await page.locator( '#status' ).innerText().catch( () => 'Benchmark running' ) );
+		console.log( await page.locator( '.bench-out' ).first().innerText().catch( () => 'Benchmark running' ) );
 
 	}, 15000 );
 	let report;
-	try { report = await page.evaluate( ( options ) => window.city.benchmark( options ), { seconds, warmup } ); }
+	try {
+
+		report = await page.evaluate( () => window.app.bench.standard() );
+		if ( ! report ) throw new Error( 'Benchmark stopped before completion.' );
+
+	}
 	finally { clearInterval( polling ); }
 	report.commit = execFileSync( 'git', [ 'rev-parse', 'HEAD' ], { encoding: 'utf8' } ).trim();
 	report.dirty = execFileSync( 'git', [ 'status', '--porcelain' ], { encoding: 'utf8' } ).trim().length > 0;
 	report.errors = errors;
 	if ( software ) { report.hardware = false; report.performanceClaim = false; report.targetMet = false; }
-	report.liveValidation = await page.evaluate( () => window.city.validate( { full: true } ) );
 	writeFileSync( output, JSON.stringify( report, null, 2 ) );
-	console.log( `Saved ${output}` );
-	for ( const result of report.scenarios ) console.log( `${result.scenario}: median ${result.medianMs.toFixed( 1 )} ms, p95 ${result.p95Ms.toFixed( 1 )} ms, dropped simulation ${result.droppedSeconds.toFixed( 2 )} s` );
-	if ( errors.length || ! report.liveValidation.ok ) throw new Error( `Benchmark correctness failed: ${errors.join( '; ' ) || JSON.stringify( report.liveValidation )}` );
+	console.log( `Saved ${output}; scene ${report.scene}; score ${report.score}; direct ${report.direct.agents} agents.` );
+	if ( errors.length ) throw new Error( `Benchmark correctness failed: ${errors.join( '; ' )}` );
 
 } catch ( e ) {
 

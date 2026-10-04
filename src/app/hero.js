@@ -13,6 +13,7 @@ export function updateHero( app, dt ) {
 	const mag = Math.min( move.length(), 1 );
 	if ( mag > 0.08 ) {
 
+		app._leaveOverview();
 		const target = Math.atan2( move.x, move.z );
 		let d = target - hero.heading;
 		d = Math.atan2( Math.sin( d ), Math.cos( d ) );
@@ -20,6 +21,13 @@ export function updateHero( app, dt ) {
 		hero.speed = ( inp.run ? 4.5 : 1.7 ) * mag;
 		hero.state = inp.run ? 2 : 1;
 		const delta = { x: Math.sin( hero.heading ) * hero.speed * dt, z: Math.cos( hero.heading ) * hero.speed * dt };
+		if ( app.collision ) {
+
+			const candidate = ( app._heroCandidate ||= new THREE.Vector3() ).copy( hero.pos );
+			app.collision.move( candidate, delta.x, delta.z );
+			delta.x = candidate.x - hero.pos.x; delta.z = candidate.z - hero.pos.z;
+
+		}
 		// With physics on, the hero is a Rapier character controller: it slides
 		// along trees / the monument and shoves bodies instead of passing through.
 		if ( ! app.physics.moveHero( hero.pos, delta ) ) {

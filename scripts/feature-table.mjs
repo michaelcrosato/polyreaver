@@ -23,7 +23,7 @@ for ( const s of SECTIONS ) {
 	console.log( `\n### ${s.title}\n` );
 	console.log( '| Setting | Default | Cost | Bound by | What it does / why it costs |' );
 	console.log( '|---|---|---|---|---|' );
-	for ( const it of s.items ) {
+	for ( const it of s.items.filter( ( item ) => item.key ) ) {
 
 		const text = ( it.info + ( it.mobile ? ` **Mobile:** ${it.mobile}` : '' ) ).replace( /\|/g, '\\|' );
 		console.log( `| ${it.label} | ${fmtDef( it )} | ${DOTS( it.cost )} ${COST[ it.cost ]} | ${it.bound} | ${text} |` );

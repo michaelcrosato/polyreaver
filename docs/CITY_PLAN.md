@@ -1,3 +1,7 @@
+> Historical proposal for the former standalone city demo. The active stress test now uses
+> `src/main.js` with city/plaza scenes; see [README.md](../README.md) for current behavior.
+> Address/schedule simulation, traffic and inspection from this plan are not active in that prototype.
+
 # Procedural city and 100000 citizen implementation plan
 
 Build a walkable, procedurally generated city using the original WebGPU crowd demo as the engine foundation. The first playable release should contain a complete, recognizable city and **100,000 persistent citizens plus the player**, with simple buildings, purposeful pedestrian movement, and measurable performance.

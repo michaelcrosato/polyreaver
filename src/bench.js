@@ -249,7 +249,7 @@ export class Bench {
 		const model = app.crowd.models[ app.crowd.tier ];
 		const tris = good * model.triangles;
 		out( `<br><b>Result: ${formatCount( good )} agents</b> (~${formatCount( tris )} crowd triangles) hold ${targetFps} fps${good >= maxN ? ' - ' + ( app.crowdLimitNote || 'that is the largest crowd buffer this GPU allows, so the real limit is higher (try a heavier model or a higher fps target)' ) : ''}.` );
-		return { targetFps, maxAgents: good, trianglesPerFrame: tris, model: model.id, path: app.S.path, judgedBy: byWork ? 'gpu+cpu time' : 'frame time', hitCapacity: good >= maxN, log };
+		return { scene: app.S.scene, seed: app.S.scene === 'city' ? app.S.seed : null, targetFps, maxAgents: good, trianglesPerFrame: tris, model: model.id, path: app.S.path, judgedBy: byWork ? 'gpu+cpu time' : 'frame time', hitCapacity: good >= maxN, log };
 
 	}
 
@@ -332,7 +332,7 @@ export class Bench {
 			}
 
 			this.results.fx = rows.map( ( r ) => ( { ...r } ) );
-			this.onResult?.( 'effects', { agents: app.S.count, warmLoadMs: this.ballast.active ? this.warmLoad : 0, rows: this.results.fx } );
+			this.onResult?.( 'effects', { scene: app.S.scene, seed: app.S.scene === 'city' ? app.S.seed : null, agents: app.S.count, warmLoadMs: this.ballast.active ? this.warmLoad : 0, rows: this.results.fx } );
 			render( app.gpu.timestamps ? '<br>done.' : '<br>done. No GPU timestamps on this device, so these are frame-time deltas: anything under the vsync limit shows as ~0.' );
 
 		} catch {

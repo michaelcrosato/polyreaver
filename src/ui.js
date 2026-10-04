@@ -49,9 +49,11 @@ export class UI {
 
 		}
 
+		const scene = sections.find( ( section ) => section.id === 'scene' );
+		if ( scene ) this._buildSection( scene );
 		this._buildPresets();
 		if ( camera ) this._buildCamera();
-		for ( const section of sections ) this._buildSection( section );
+		for ( const section of sections ) if ( section !== scene ) this._buildSection( section );
 		this._buildBench();
 
 		if ( window.matchMedia( '(min-width: 900px)' ).matches ) this.panel.classList.add( 'open' );
@@ -117,7 +119,7 @@ export class UI {
 
 		const body = h( 'div', { class: 'section-body' } );
 		for ( const item of section.items ) body.append( this._buildItem( item ) );
-		this.body.append( this._sectionShell( section.title, body, section.id === 'crowd' ) );
+		this.body.append( this._sectionShell( section.title, body, [ 'scene', 'crowd' ].includes( section.id ) ) );
 
 	}
 
@@ -135,7 +137,12 @@ export class UI {
 		let control, set;
 		const valueLabel = h( 'span', { class: 'value' } );
 
-		if ( item.type === 'toggle' ) {
+		if ( item.type === 'text' ) {
+
+			control = h( 'input', { type: 'text', maxlength: 128, onchange: ( e ) => this.onChange( item.key, e.target.value ) } );
+			set = ( v ) => ( control.value = String( v ) );
+
+		} else if ( item.type === 'toggle' ) {
 
 			control = h( 'input', { type: 'checkbox', onchange: ( e ) => this.onChange( item.key, e.target.checked ) } );
 			set = ( v ) => ( control.checked = !! v );

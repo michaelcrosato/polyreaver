@@ -18,6 +18,13 @@ export { fmt as formatCount };
 
 export const SECTIONS = [
 	{
+		id: 'scene', title: 'Scene', items: [
+			{ key: 'scene', label: 'Scene', type: 'select', def: 'city', cost: 2, bound: 'vertex / compute', options: [ [ 'city', 'Procedural city' ], [ 'plaza', 'Original plaza' ] ], info: 'One stress test, two environments. Both use every crowd, graphics, animation, physics and benchmark control below. The city adds seeded buildings, streets, parks and bridges; agents wander on its walkable surface.' },
+			{ key: 'seed', label: 'City seed', type: 'text', def: 'harbor-100k', cost: 0, bound: 'cpu', info: 'The same seed generates the same 2 km city. Editing it regenerates the city while preserving engine settings.' },
+			{ type: 'actions', actions: [ [ 'regenerateCity', 'Regenerate city' ], [ 'cityOverview', 'City overview' ] ] }
+		]
+	},
+	{
 		id: 'crowd',
 		title: 'Crowd',
 		items: [
@@ -60,7 +67,7 @@ export const SECTIONS = [
 				options: [ [ 0, 'Wander (random activities)' ], [ 1, 'Converge on hero (mass rush)' ], [ 2, 'Flee from hero' ], [ 3, 'Dance party' ], [ 4, 'Stadium wave' ], [ 5, 'Freeze (simulation off)' ] ],
 				info: 'All simulation runs in one compute shader, so behaviour changes are free on the CPU. "Converge" packs everyone around the hero: huge overdraw hot-spot.'
 			},
-			{ key: 'density', label: 'Density (people / m²)', type: 'range', def: 0.35, min: 0.05, max: 3, step: 0.05, cost: 1, bound: 'fill', info: 'How tightly the crowd is packed. Denser crowds overlap more on screen (overdraw) and the world gets smaller.' },
+			{ key: 'density', label: 'Density (people / m²)', type: 'range', def: 0.35, min: 0.05, max: 3, step: 0.05, cost: 1, bound: 'fill', info: 'How tightly the crowd is packed. Denser crowds overlap more on screen (overdraw). In the plaza the world gets smaller; in the city the radial distribution is projected onto clear ground and compressed when it reaches the finite map bounds.' },
 			{ key: 'activity', label: 'Activity (share walking)', type: 'range', def: 0.6, min: 0, max: 1, step: 0.05, cost: 0, bound: 'compute', info: 'Chance that an agent picks walking/running over standing activities when its timer runs out.' },
 			{ key: 'speed', label: 'Walk speed', type: 'range', def: 1, min: 0, max: 3, step: 0.1, cost: 0, bound: 'compute', info: 'Global speed multiplier.' }
 		]

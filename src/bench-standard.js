@@ -42,12 +42,12 @@ export async function runStandard( bench ) {
 	const show = ( step, html = '' ) => app.ui.setBenchOutput( head + done.join( '<br>' ) + ( step ? `<br><i>${step}</i><br>${html}` : html ) );
 
 	app.setFixedResolution( STANDARD );
-	app.rig.setBenchView( () => app.crowd.radius );
+	app.rig.setBenchView( () => app.world.city ? 1450 : app.crowd.radius );
 	let result = null;
 
 	try {
 
-		const base = defaults();
+		const base = { ...defaults(), scene: original.scene, seed: original.seed };
 
 		const crowdTest = async ( n, label, settings ) => {
 
@@ -73,6 +73,7 @@ export async function runStandard( bench ) {
 
 		result = {
 			version: STANDARD.version,
+			scene: original.scene, seed: original.scene === 'city' ? original.seed : null,
 			score: Math.round( direct.maxAgents / 1000 ),
 			resolution: `${STANDARD.width}x${STANDARD.height}`,
 			targetFps: STANDARD.targetFps,

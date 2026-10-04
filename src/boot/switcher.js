@@ -6,13 +6,14 @@ export function installSwitcher( boot ) {
 	const select = document.getElementById( 'engine-select' );
 	const remember = () => {
 
-		const engine = boot.state.mode === 'stress' ? window.city : boot.state.mode === 'classic' ? window.app : null;
+		const engine = boot.state.mode === 'stress' ? window.app : null;
 		const hash = engine?.shareLink ? new URL( engine.shareLink() ).hash : location.hash;
 		try { sessionStorage.setItem( 'polyreaver.mode.' + boot.state.mode, hash ); } catch { /* optional */ }
 
 	};
 	const navigate = ( mode ) => {
 
+		if ( ! [ 'game', 'stress', 'choose' ].includes( mode ) ) return;
 		remember();
 		const url = new URL( location.href );
 		url.searchParams.set( 'engine', mode );
@@ -26,6 +27,8 @@ export function installSwitcher( boot ) {
 	nav.hidden = false;
 	document.body.dataset.runningMode = boot.state.mode;
 	// Internal links use the same switch path, so one downloaded file is sufficient.
-	for ( const link of document.querySelectorAll( '[data-engine]' ) ) link.onclick = ( event ) => { event.preventDefault(); navigate( link.dataset.engine ); };
+	// Three.js also puts data-engine on its canvas. Only anchors switch engines;
+	// assigning that handler to the canvas turns every map click into navigation.
+	for ( const link of document.querySelectorAll( 'a[data-engine]' ) ) link.onclick = ( event ) => { event.preventDefault(); navigate( link.dataset.engine ); };
 
 }

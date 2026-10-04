@@ -13,6 +13,7 @@ export function buildReport( app ) {
 	const changed = Object.entries( S ).filter( ( [ k, v ] ) => base[ k ] !== v ).map( ( [ k, v ] ) => `  ${findItem( k )?.label || k}: ${v}` );
 	const lines = [
 		'WebGPU Crowd Stress Test - report',
+		`Scene: ${S.scene}${app.world.city ? ` · seed ${app.world.city.seed} · layout ${app.world.city.layoutHash}` : ''}`,
 		new Date().toISOString(),
 		'',
 		'GPU: ' + describeAdapter( g.info ),
@@ -22,8 +23,10 @@ export function buildReport( app ) {
 		`Screen: ${innerWidth}x${innerHeight} CSS px @ DPR ${DPR} -> rendering ${app.renderer.domElement.width}x${app.renderer.domElement.height}`,
 		'',
 		`Now: ${s.fps.toFixed( 1 )} fps · frame ${s.frameMs.toFixed( 2 )} ms · CPU ${s.cpuMs.toFixed( 2 )} ms` + ( g.timestamps ? ` · GPU ${( s.gpuRender + s.gpuCompute ).toFixed( 2 )} ms` : '' ),
+		`Play-session spikes: worst frame ${s.worstFrameMs.toFixed( 2 )} ms · worst CPU ${s.worstCpuMs.toFixed( 2 )} ms · ${s.framesOver50} frames over 50 ms (loading excluded)`,
 		`Agents: ${S.count} · model ${app.crowd.models[ S.tier ].id} (${app.crowd.models[ S.tier ].triangles} tris) · path ${S.path}`,
 		`Triangles/frame (all passes): ${formatCount( app._tris || 0 )}`,
+		...( app.renderPreparation ? [ `Scene preparation: ${app.renderPreparation.objects} objects · ${app.renderPreparation.ms.toFixed( 0 )} ms before play` ] : [] ),
 		'',
 		'Settings changed from default:',
 		...( changed.length ? changed : [ '  (none - bare baseline)' ] )

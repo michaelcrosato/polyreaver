@@ -2,7 +2,7 @@ import { BootLoader } from './loader.js';
 import { createDevice, describeAdapter } from '../gpu.js';
 
 const paths = import.meta.env.DEV
-	? { game: '/src/game/main.js', stress: '/src/main.js', city: '/src/city/main.js' }
+	? { game: '/src/game/main.js', stress: '/src/main.js' }
 	: __ENGINE_PATHS__;
 
 async function loadEngine( id ) {
@@ -24,8 +24,7 @@ const boot = new BootLoader( {
 	brand: 'POLYREAVER', version: __BOOT_VERSION__, build: __BOOT_BUILD__,
 	modes: {
 		game: { label: 'hack and slash', load: () => loadEngine( 'game' ) },
-		stress: { label: 'procedural city stress test', load: () => loadEngine( 'city' ) },
-		classic: { label: 'classic crowd test', load: () => loadEngine( 'stress' ) }
+		stress: { label: 'crowd stress test', load: () => loadEngine( 'stress' ) }
 	}
 } );
 
@@ -82,8 +81,10 @@ try {
 
 	} );
 	const requested = new URLSearchParams( location.search ).get( 'engine' );
-	const mode = requested || ( document.body.dataset.bootMode === 'city' ? 'stress' : document.body.dataset.bootMode );
-	if ( [ 'game', 'stress', 'classic' ].includes( mode ) ) await boot.launch( mode, gpu );
+	const entry = document.body.dataset.bootMode;
+	const mode = requested || ( [ 'city', 'classic' ].includes( entry ) ? 'stress' : entry );
+	boot.initialScene = mode === 'classic' || ! requested && entry === 'classic' ? 'plaza' : 'city';
+	if ( [ 'game', 'stress', 'classic', 'city' ].includes( mode ) ) await boot.launch( [ 'city', 'classic' ].includes( mode ) ? 'stress' : mode, gpu );
 	else boot.choose( gpu );
 
 } catch ( error ) {

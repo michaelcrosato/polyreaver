@@ -11,7 +11,7 @@ const metadata = bootMetadata();
 const paths = {}, sources = {};
 rmSync( 'dist', { recursive: true, force: true } );
 mkdirSync( 'dist/engines', { recursive: true } );
-for ( const [ id, entry ] of Object.entries( { game: 'src/game/main.js', stress: 'src/main.js', city: 'src/city/main.js' } ) ) {
+for ( const [ id, entry ] of Object.entries( { game: 'src/game/main.js', stress: 'src/main.js' } ) ) {
 
 	const result = await build( {
 		configFile: false, base: './', worker: { format: 'iife' },
@@ -44,9 +44,9 @@ for ( const file of [ 'game.html', 'polyreaver.html', 'webgpu-crowd-stress.html'
 for ( const file of [ 'city.html', 'city-demo.html' ] ) writeFileSync( `dist/${file}`, cityShell );
 for ( const file of [ 'classic.html', 'classic-crowd.html' ] ) writeFileSync( `dist/${file}`, classicShell );
 const standalone = ( html, ids ) => html.replace( '</body>', ids.map( ( id ) => `<script type="application/octet-stream" id="boot-engine-${id}">${sources[ id ]}</script>` ).join( '\n' ) + '\n</body>' );
-const chooser = standalone( shell, [ 'game', 'city', 'stress' ] );
-const city = standalone( cityShell, [ 'game', 'city', 'stress' ] );
-const classic = standalone( classicShell, [ 'game', 'city', 'stress' ] );
+const chooser = standalone( shell, [ 'game', 'stress' ] );
+const city = standalone( cityShell, [ 'game', 'stress' ] );
+const classic = standalone( classicShell, [ 'game', 'stress' ] );
 for ( const [ file, content ] of Object.entries( { 'webgpu-crowd-stress.html': chooser, 'polyreaver.html': chooser, 'city-demo.html': city, 'classic-crowd.html': classic, 'dist-game/game.html': chooser, 'dist-city/city.html': city } ) ) {
 
 	mkdirSync( resolve( file, '..' ), { recursive: true } );

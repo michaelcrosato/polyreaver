@@ -12,7 +12,7 @@ export class CityPhysics extends PhysicsDemo {
 		this.buildingColliders = [];
 		this.worldGfx.createPhysicsGround = ( world, R ) => {
 
-			const city = this.app.data;
+			const city = this.app.world.city;
 			const box = ( x0, z0, x1, z1 ) => world.createCollider( R.ColliderDesc.cuboid( ( x1 - x0 ) / 2, .5, ( z1 - z0 ) / 2 ).setTranslation( ( x0 + x1 ) / 2, -.5, ( z0 + z1 ) / 2 ) );
 			box( - 1024, - 1024, city.water.x0, 1024 ); box( city.water.x1, - 1024, 1024, 1024 );
 			for ( const row of city.bridgeRows ) box( city.water.x0, city.zs[ row ] - city.halves[ row ] - city.config.sidewalk, city.water.x1, city.zs[ row ] + city.halves[ row ] + city.config.sidewalk );
@@ -26,7 +26,7 @@ export class CityPhysics extends PhysicsDemo {
 		super.rebuildPropColliders();
 		for ( const c of this.buildingColliders ) this.world.removeCollider( c, false );
 		this.buildingColliders = [];
-		for ( const b of this.app.data.buildings ) {
+		for ( const b of this.app.world.city.buildings ) {
 
 			this.buildingColliders.push( this.world.createCollider( RAPIER.ColliderDesc.cuboid( ( b.x1 - b.x0 ) / 2, b.height / 2, ( b.z1 - b.z0 ) / 2 ).setTranslation( ( b.x0 + b.x1 ) / 2, b.height / 2, ( b.z0 + b.z1 ) / 2 ) ) );
 

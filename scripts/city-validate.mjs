@@ -1,3 +1,4 @@
+import { buildWalkMap } from '../src/city/walk-map.js';
 // Deterministic seed corpus, independent routing reference, capacity and geometry
 // invariants. No browser or GPU is required for these generation tests.
 import test from 'node:test';
@@ -191,5 +192,24 @@ test( 'swept player collision prevents wall and bank tunneling while bridges rem
 	collision.move( bank, city.water.x1 - city.water.x0 + 5, 0 ); assert.ok( bank.x < city.water.x0 - .3 );
 	const bridge = { x: city.water.x0 - 1, z: city.zs[ city.bridgeRows[ 0 ] ] };
 	collision.move( bridge, city.water.x1 - city.water.x0 + 2, 0 ); assert.ok( bridge.x > city.water.x1 );
+
+} );
+
+
+test( 'stress-test walk atlas projects every cell to safe ground without agent buffers', () => {
+
+	const city = generateCity( { seed: 'stress-walk-map', population: 1 } );
+	const map = buildWalkMap( city.surface ), { size, data } = map;
+	assert.equal( data.byteLength, size * size * 4 ); assert.ok( map.safeCells > 10000 );
+	for ( let i = 0; i < size * size; i ++ ) {
+
+		const x = data[ i * 4 ] + data[ i * 4 + 1 ] * 256, z = data[ i * 4 + 2 ] + data[ i * 4 + 3 ] * 256;
+		assert.ok( x > 0 && z > 0 && x < size - 1 && z < size - 1 );
+		assert.equal( city.surface.data[ ( z * size + x ) * 4 + 1 ], 1 );
+		const n = ( z * size + x ) * 4;
+		assert.deepEqual( data.subarray( n, n + 4 ), data.subarray( i * 4, i * 4 + 4 ) );
+
+	}
+	assert.throws( () => buildWalkMap( { size: 4, data: new Uint8Array( 64 ) } ), /no safe walking surface/ );
 
 } );

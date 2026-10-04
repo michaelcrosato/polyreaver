@@ -131,6 +131,15 @@ export class PhysicsDemo {
 
 	}
 
+	dispose() {
+
+		this.disable();
+		this.world?.free();
+		this.world = null;
+		this.ready = false;
+
+	}
+
 	// Apply a partial parameter set; rebuilds only what the change requires.
 	configure( next ) {
 

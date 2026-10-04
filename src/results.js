@@ -26,7 +26,10 @@ function deviceLabel( run, thisDevice, devices ) {
 	const dev = devices[ run.device ] || {};
 	const name = run.gpu || dev.gpu || 'device ' + String( run.device || '?' ).slice( 0, 6 );
 	const kind = run.deviceKind || dev.kind ? ` (${run.deviceKind || dev.kind})` : '';
+	const scene = run.data?.scene || 'plaza';
+	const seed = scene === 'city' && run.data?.seed ? ` · ${run.data.seed}` : '';
 	return esc( name + kind ) + ( run.device === thisDevice ? ' <span class="dim">· this one</span>' : '' ) +
+		`<br><span class="dim">${esc( scene + seed )}</span>` +
 		`<br><span class="dim">${esc( when( run.at ) )}</span>`;
 
 }
@@ -56,7 +59,7 @@ export function renderRuns( runs, thisDevice, devices = {} ) {
 	let html = '';
 	if ( standard.length ) {
 
-		html += '<b>Standard benchmark</b> <span class="dim">(1920×1080, same conditions everywhere; agents at 60 fps)</span>' +
+		html += '<b>Standard benchmark</b> <span class="dim">(1920×1080; compare the same scene and seed; agents at 60 fps)</span>' +
 			'<table><tr><th>Device</th><th>Score</th><th>Tetra direct</th><th>Box-man direct</th><th>Box-man GPU + LOD</th><th>Console look</th></tr>' +
 			standard.map( ( r ) => {
 

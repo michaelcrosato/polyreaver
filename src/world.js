@@ -77,6 +77,7 @@ export class World {
 
 	get propTriangles() {
 
+		if ( this.cityView ) return this.cityView.meshes.filter( ( mesh ) => mesh.visible ).reduce( ( sum, mesh ) => sum + ( mesh.geometry.index?.count || mesh.geometry.attributes.position.count ) / 3 * ( mesh.isInstancedMesh ? mesh.count : 1 ), 0 );
 		if ( ! this.propsOn ) return 0;
 		return ( this.trees ? this.trees.count * this.treeGeo.userData.triangles : 0 ) +
 			( this.lamps ? this.lamps.count * this.lampGeo.userData.triangles : 0 ) +
@@ -150,6 +151,7 @@ export class World {
 
 	setRadius( r ) {
 
+		if ( this.cityView ) { this.radius = 1450; return; }
 		this.radius = r;
 		this.ensureCapacity( r );
 		const gr = r + 80;
@@ -161,6 +163,7 @@ export class World {
 
 	_applyProps() {
 
+		if ( this.cityView ) { this.cityView.setProps( this.propsOn ); return; }
 		if ( ! this.trees ) return;
 		const within = ( pts ) => {
 
@@ -220,6 +223,7 @@ export class World {
 	setShading( kind ) {
 
 		this.kind = kind;
+		if ( this.cityView ) { this.cityView.setShading( kind ); return; }
 		const gm = makeMaterial( kind );
 		gm.colorNode = this._groundColorNode();
 		if ( gm.isMeshStandardNodeMaterial ) {
@@ -248,13 +252,15 @@ export class World {
 	setGroundDetail( on ) {
 
 		this.groundDetail = on;
-		this.setShading( this.kind );
+		if ( this.cityView ) this.cityView.setGroundDetail( on );
+		else this.setShading( this.kind );
 
 	}
 
 	setWet( on ) {
 
 		this.u.groundWet.value = on ? 1 : 0;
+		this.cityView?.setWet( on );
 
 	}
 
@@ -280,6 +286,17 @@ export class World {
 	_applyShadowFlags() {
 
 		const on = this.shadowsOn;
+		if ( this.cityView ) {
+
+			for ( const mesh of this.cityView.meshes ) {
+
+				mesh.receiveShadow = on;
+				mesh.castShadow = on && ( mesh.isInstancedMesh || mesh.name.startsWith( 'City props' ) );
+
+			}
+			return;
+
+		}
 		this.ground.receiveShadow = on;
 		this.monument.castShadow = this.monument.receiveShadow = on;
 		for ( const mesh of [ this.trees, this.lamps ] ) {
@@ -293,6 +310,38 @@ export class World {
 	setPointLights( n ) {
 
 		rebuildPointLights( this, n );
+
+	}
+
+	// Swap only scene geometry. Lighting, fog and all engine controls stay shared.
+	setCity( view ) {
+
+		if ( this.cityView ) {
+
+			this.cityView.dispose();
+			Object.assign( this, this.plazaProps );
+
+		}
+		this.cityView = view;
+		this.city = view?.city || null;
+		this.createPhysicsGround = null;
+		this.plazaProps = { trees: this.trees, lamps: this.lamps, treePts: this.treePts, lampPts: this.lampPts, lampPositions: this.lampPositions };
+		for ( const mesh of [ this.ground, this.monument, this.trees, this.lamps ] ) if ( mesh ) mesh.visible = ! view;
+		if ( view ) {
+
+			for ( const key of [ 'trees', 'lamps', 'treePts', 'lampPts' ] ) this[ key ] = view[ key ];
+			this.lampPositions = this.lampPts.map( ( p ) => new THREE.Vector3( p.x, 4, p.z ) );
+			this.radius = 1450;
+			view.setShading( this.kind ); view.setProps( this.propsOn ); view.setGroundDetail( this.groundDetail ); view.setWet( this.u.groundWet.value > 0 );
+
+		} else {
+
+			this.setShading( this.kind );
+			this._applyProps();
+
+		}
+		this._applyShadowFlags();
+		this._lightTimer = 0;
 
 	}
 

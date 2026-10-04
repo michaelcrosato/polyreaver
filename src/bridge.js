@@ -210,21 +210,21 @@ export class ClaudeLink {
 			case 'preset': {
 
 				if ( ! PRESETS[ args.id ] ) throw new Error( 'unknown preset ' + args.id + ' (have: ' + Object.keys( PRESETS ).join( ', ' ) + ')' );
-				app.preset( args.id );
+				await app.preset( args.id );
 				return { changed: this._changedSettings() };
 
 			}
 
 			case 'reset': {
 
-				app.applyAll( { ...defaults(), count: args.keepCount ? app.S.count : defaults().count } );
+				await app.applyAll( { ...defaults(), scene: app.S.scene, seed: app.S.seed, count: args.keepCount ? app.S.count : defaults().count } );
 				return { changed: this._changedSettings() };
 
 			}
 
 			case 'set': {
 
-				app.applyAll( this._validated( args.values ) );
+				await app.applyAll( this._validated( args.values ) );
 				return { changed: this._changedSettings() };
 
 			}

@@ -9,4 +9,6 @@ artifacts/city/
 
 .vercel/
 artifacts/boot/
+artifacts/unified/
+artifacts/rendering/
 .env*

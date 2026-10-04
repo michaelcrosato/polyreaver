@@ -14,6 +14,7 @@ import {
 import { sampleBlended, channels, emitBoneMatrices, BONES, BONE_ROWS } from './anim.js';
 import { CrowdCollider } from './collide.js';
 import { buildCull } from './cull.js';
+import { projectSurface, surfaceHome, constrainSurface } from './surface.js';
 
 export const TAU = Math.PI * 2;
 const SKELETAL_MAX = 131072; // bone buffer cap: 131k agents x 480 B = 63 MB ('bat' has no buffer, no cap)
@@ -28,7 +29,7 @@ function homeOf( crowd, fi ) {
 	// Vogel / sunflower spiral: agent i lives at radius sqrt(i / (pi * density)).
 	const r = sqrt( fi.div( crowd.u.density.mul( Math.PI ) ) );
 	const a = fi.mul( 2.39996323 );
-	return vec2( cos( a ), sin( a ) ).mul( r );
+	return surfaceHome( crowd, vec2( cos( a ), sin( a ) ).mul( r ) );
 
 }
 
@@ -81,7 +82,7 @@ export function buildComputes( crowd ) {
 		const home = homeOf( crowd, fi );
 		const ang = hashF( fi, 1 ).mul( TAU );
 		const rad = sqrt( hashF( fi, 2 ) ).mul( u.wander );
-		const pos = home.add( vec2( cos( ang ), sin( ang ) ).mul( rad ) ).toVar();
+		const pos = projectSurface( crowd, home.add( vec2( cos( ang ), sin( ang ) ).mul( rad ) ) ).toVar();
 		const state = floor( hashF( fi, 3 ).mul( 7 ) ).toVar();
 		const heading = hashF( fi, 4 ).mul( TAU );
 		const seed = float( i.mod( 4095 ).add( 1 ) ).toVar();
@@ -110,6 +111,7 @@ export function buildComputes( crowd ) {
 		const ad = animBuf.element( i ).toVar();
 
 		const pos = vec2( rd.x, rd.z ).toVar();
+		const previous = crowd.citySurface ? pos.toVar() : null;
 		const phase = rd.y.toVar();
 		const seed = floor( rd.w.mul( 1 / 2048 ) ).toVar();
 		const rem = rd.w.sub( seed.mul( 2048 ) );
@@ -212,7 +214,7 @@ export function buildComputes( crowd ) {
 					const a = rnd( 4 ).mul( TAU );
 					const longTrip = r3.lessThan( 0.08 );
 					const radius = select( longTrip, crowdRadius( crowd ).mul( 0.9 ), u.wander );
-					const centre = select( longTrip, vec2( 0 ), home );
+					const centre = select( longTrip, crowd.cityOrigin || vec2( 0 ), home );
 					target.assign( centre.add( vec2( cos( a ), sin( a ) ).mul( sqrt( rnd( 5 ) ).mul( radius ) ) ) );
 					timer.assign( 600 );
 
@@ -227,6 +229,8 @@ export function buildComputes( crowd ) {
 				} );
 
 			} );
+
+			if ( crowd.citySurface ) target.assign( projectSurface( crowd, target ) );
 
 			// Locomotion (desired movement) -----------------------------------------
 			const moving = state.equal( 1 ).or( state.equal( 2 ) );
@@ -298,6 +302,8 @@ export function buildComputes( crowd ) {
 			collider.phys.element( i ).assign( vec4( knockVel, max( knockT, 0 ), 0 ) );
 
 		}
+
+		if ( crowd.citySurface ) constrainSurface( crowd, pos, previous, timer, heading );
 
 		// Hero (agent 0) is driven by the player ------------------------------
 		If( i.equal( 0 ), () => {

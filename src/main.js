@@ -19,6 +19,8 @@ import { applyCrowd, applyShading, applyWorld, applyCamera, applyPost, applyPhys
 import { updateHero } from './app/hero.js';
 import { updateHud, buildReport } from './app/hud.js';
 import { bindButtons, hotkey } from './app/controls.js';
+import { regenerateScene, sceneKey } from './app/scene.js';
+import { prepareRendering } from './app/prepare.js';
 
 class App {
 
@@ -28,7 +30,10 @@ class App {
 		this.boot = boot;
 
 		this.gpu = gpu;
-		this.S = { ...defaults(), ...readHash() };
+		const params = new URLSearchParams( location.hash.slice( 1 ) );
+		this.S = { ...defaults(), ...( boot.initialScene ? { scene: boot.initialScene } : {} ), ...readHash() };
+		// Older city links called the crowd size "population".
+		if ( params.has( 'population' ) && ! params.has( 'count' ) ) this.S.count = Number( params.get( 'population' ) );
 		this.frameCount = 0;
 
 		const renderer = new THREE.WebGPURenderer( { device: gpu.device, antialias: false, trackTimestamp: gpu.timestamps } );
@@ -59,9 +64,9 @@ class App {
 		this.heroRing = ring;
 
 		this.ui = new UI( this.S, {
-			onChange: ( k, v ) => this.set( k, v ),
-			onPreset: ( id ) => this.preset( id ),
-			onAction: ( a ) => this.action( a )
+			onChange: ( k, v ) => this._uiAction( () => this.set( k, v ) ),
+			onPreset: ( id ) => this._uiAction( () => this.preset( id ) ),
+			onAction: ( a ) => this._uiAction( () => this.action( a ) )
 		} );
 		this.bench = new Bench( this );
 		this.graph = new Graph( document.getElementById( 'graph' ) );
@@ -69,14 +74,20 @@ class App {
 		if ( IS_MOBILE ) document.body.classList.add( 'touch' );
 		this._bindButtons();
 		this.input.onKey = ( e ) => this._hotkey( e );
-		this.rig.onUserInput = () => {};
+		this.rig.onUserInput = () => this._leaveOverview();
 
-		this.applyAll( this.S );
+		await boot.step( 'WORLD', 'Preparing stress-test scene', 70, () => this.applyAll( this.S ), 120000 );
 		if ( this.physicsStartup ) await this.physicsStartup;
 		boot.assertActive();
+		await boot.step( 'WARM', 'Preparing all scene views', 82, () => prepareRendering( this, ( message ) => {
+
+			boot.state.message = message;
+			boot.render();
+
+		} ), 120000 );
 		window.addEventListener( 'resize', () => this.resize() );
 
-		this.stats = { frames: 0, acc: 0, cpu: 0, last: performance.now(), fps: 0, frameMs: 0, cpuMs: 0, gpuRender: 0, gpuCompute: 0 };
+		this.stats = { frames: 0, acc: 0, cpu: 0, last: performance.now(), fps: 0, frameMs: 0, cpuMs: 0, gpuRender: 0, gpuCompute: 0, worstFrameMs: 0, worstCpuMs: 0, framesOver50: 0 };
 		this._lastFrame = performance.now();
 		this._startTime = performance.now();
 		this.link = new ClaudeLink( this );
@@ -86,6 +97,9 @@ class App {
 			frame: () => this.frame(),
 			start: () => {
 
+				// The GPU wait for FRAME belongs to loading, not the first play frame.
+				this._lastFrame = this.stats.last = performance.now();
+				this.stats.frames = this.stats.acc = this.stats.cpu = 0;
 				renderer.setAnimationLoop( () => this.frame() );
 				this.link.start().catch( ( e ) => console.warn( 'Claude link unavailable', e ) );
 
@@ -116,6 +130,19 @@ class App {
 
 	set( key, value ) {
 
+		if ( this.renderTask ) return this._afterRendering( key, value, () => this.set( key, value ) );
+		const meshes = this.crowd.meshes, trees = this.world.trees, lamps = this.world.lamps;
+		if ( key === 'camera' ) this._leaveOverview();
+		if ( key === 'scene' || key === 'seed' ) {
+
+			if ( this.bench.running ) return Promise.reject( new Error( 'Stop the benchmark before changing scenes.' ) );
+			if ( key === 'scene' && ! [ 'city', 'plaza' ].includes( value ) ) return Promise.reject( new Error( 'Unknown scene.' ) );
+			this.S[ key ] = key === 'seed' ? String( value ).slice( 0, 128 ) : value;
+			this.ui.sync();
+			if ( this.scenePending || this.sceneKey !== sceneKey( this.S ) ) return regenerateScene( this );
+			return;
+
+		}
 		if ( key === 'count' && value > this.crowd.capacity && this.S.capacity !== 'auto' ) {
 
 			// growing past a fixed capacity: switch to the next size up
@@ -143,12 +170,63 @@ class App {
 		const c = this.ui.controls.get( key );
 		if ( c ) c.set( this.S[ key ] );
 		if ( key === 'count' || key === 'capacity' ) this.ui.controls.get( 'capacity' )?.set( this.S.capacity );
+		if ( key === 'camera' || SHADING_KEYS.has( key ) || WORLD_KEYS.has( key ) || RES_KEYS.has( key ) || POST_KEYS.has( key ) || PHYS_KEYS.has( key ) ||
+			meshes !== this.crowd.meshes || trees !== this.world.trees || lamps !== this.world.lamps ) return this._prepareRendering();
 
 	}
 
 	applyAll( values ) {
 
+		if ( this.renderTask ) return this._afterRendering( 'applyAll', values, () => this.applyAll( values ) );
+		const next = { ...this.S, ...values };
+		if ( this.bench.running && this.sceneKey !== sceneKey( next ) ) return Promise.reject( new Error( 'Stop the benchmark before changing scenes.' ) );
 		Object.assign( this.S, values );
+		if ( this.scenePending || this.sceneKey !== sceneKey( this.S ) ) return regenerateScene( this );
+		this._applySettings();
+		return this._prepareRendering();
+
+	}
+
+	_afterRendering( key, value, run ) {
+
+		// Keep the last slider/preset value received while compiling. Replaying
+		// every intermediate value would turn a quick drag into a long work queue.
+		const pending = this.pendingRenderChanges || ( this.pendingRenderChanges = new Map() );
+		const request = { value, run };
+		pending.set( key, request );
+		return this.renderTask.then( () => {
+
+			if ( pending.get( key ) !== request ) return;
+			pending.delete( key );
+			return run();
+
+		} );
+
+	}
+
+	_prepareRendering() {
+
+		if ( this.boot.state.status !== 'running' ) return;
+		if ( this.renderTask ) return this.renderTask;
+		const status = document.getElementById( 'scene-status' ), label = status.textContent;
+		this.renderPreparing = true;
+		this.renderTask = Promise.resolve().then( async () => {
+
+			if ( this.physicsStartup ) await this.physicsStartup;
+			await prepareRendering( this, ( message ) => { status.textContent = message; } );
+
+		} ).finally( () => {
+
+			this.renderTask = null; this.renderPreparing = false;
+			this._lastFrame = performance.now(); status.textContent = label;
+
+		} );
+		return this.renderTask;
+
+	}
+
+	_applySettings() {
+
 		this._applyShading();
 		this._applyCrowd();
 		this._applyWorld();
@@ -165,8 +243,8 @@ class App {
 		const preset = PRESETS[ id ].values;
 		const values = { ...defaults(), ...preset };
 		// keep crowd size / camera / physics choices unless the preset sets them
-		for ( const k of [ 'count', 'capacity', 'camera', 'physics', 'bodies', 'shape', 'behaviour', 'density', 'crowdMode' ] ) if ( ! ( k in preset ) ) values[ k ] = this.S[ k ];
-		this.applyAll( values );
+		for ( const k of [ 'scene', 'seed', 'count', 'capacity', 'camera', 'physics', 'bodies', 'shape', 'behaviour', 'density', 'crowdMode' ] ) if ( ! ( k in preset ) ) values[ k ] = this.S[ k ];
+		return this.applyAll( values );
 
 	}
 
@@ -266,9 +344,14 @@ class App {
 
 	action( a ) {
 
+		if ( this.renderTask && [ 'regenerateCity', 'cityOverview', 'benchCrowd', 'benchFx', 'benchStandard' ].includes( a ) ) return this.renderTask.then( () => this.action( a ) );
+		if ( this.scenePending && [ 'benchCrowd', 'benchFx', 'benchStandard' ].includes( a ) ) return Promise.reject( new Error( 'Wait for city generation before starting a benchmark.' ) );
+		if ( [ 'rotL', 'rotR', 'recenter', 'zoomIn', 'zoomOut' ].includes( a ) ) this._leaveOverview();
 		const rig = this.rig;
 		switch ( a ) {
 
+			case 'regenerateCity': if ( this.bench.running ) return Promise.reject( new Error( 'Stop the benchmark before regenerating.' ) ); this.S.scene = 'city'; return regenerateScene( this );
+			case 'cityOverview': if ( this.world.city && ! this.bench.running ) { this.overview = true; this.rig.setBenchView( () => 1450 ); this._applyPost(); return this._prepareRendering(); } break;
 			case 'rotL': rig.rotateStep( 1 ); break;
 			case 'rotR': rig.rotateStep( - 1 ); break;
 			case 'recenter': rig.recenter(); break;
@@ -279,14 +362,36 @@ class App {
 			case 'explode': this._needPhysics() && this.physics.explode( this.hero.pos ); break;
 			case 'wrecking': this._needPhysics() && this.physics.dropWreckingBall( this.hero.pos, this.hero.heading ); break;
 			case 'respawn': this._needPhysics() && this.physics.respawn(); break;
-			case 'benchCrowd': this.bench.findMaxCrowd( Number( this.ui.benchTarget.value ) ); break;
-			case 'benchFx': this.bench.measureEffects(); break;
-			case 'benchStandard': this.bench.standard(); break;
+			case 'benchCrowd': return this.bench.findMaxCrowd( Number( this.ui.benchTarget.value ) );
+			case 'benchFx': return this.bench.measureEffects();
+			case 'benchStandard': return this.bench.standard();
 			case 'benchStop': this.bench.stop(); break;
 			case 'report': this._copy( this.report(), 'Report copied to clipboard' ); break;
 			case 'share': this._copy( this.shareLink(), 'Settings link copied' ); break;
 
 		}
+
+	}
+
+	_uiAction( run ) {
+
+		Promise.resolve().then( run ).catch( ( error ) => this.ui.setWarnings( [ error.message ] ) );
+
+	}
+
+	_leaveOverview() {
+
+		if ( ! this.overview || this.bench.running ) return;
+		if ( this.renderTask ) {
+
+			this.renderTask.then( () => this._leaveOverview() ).catch( ( error ) => this.ui.setWarnings( [ error.message ] ) );
+			return;
+
+		}
+		this.overview = false;
+		this.rig.setBenchView( null );
+		this._applyPost();
+		this._prepareRendering()?.catch( ( error ) => this.ui.setWarnings( [ error.message ] ) );
 
 	}
 
@@ -326,7 +431,10 @@ class App {
 
 		}
 
-		return location.href.split( '#' )[ 0 ] + '#' + params.toString();
+		// Scene must be explicit when opening a shared link through a legacy alias.
+		params.set( 'scene', this.S.scene );
+		const url = new URL( location.href ); url.searchParams.set( 'engine', 'stress' ); url.hash = params.toString();
+		return url.href;
 
 	}
 
@@ -347,6 +455,8 @@ class App {
 	// the app: report it in the warning bar and keep going.
 	frame() {
 
+		// Async preparation owns renderer state until every active chunk is ready.
+		if ( this.renderPreparing ) return;
 		try {
 
 			this._frame();
@@ -404,6 +514,15 @@ class App {
 
 		this.frameCount ++;
 		const s = this.stats;
+		// Keep spikes after the smoothed FPS has recovered. Loading/preparation is
+		// excluded, and frameMs stays unclamped even though simulation dt is capped.
+		if ( this.boot.state.status === 'running' && document.visibilityState === 'visible' ) {
+
+			s.worstFrameMs = Math.max( s.worstFrameMs, frameMs );
+			s.worstCpuMs = Math.max( s.worstCpuMs, cpuMs );
+			if ( frameMs > 50 ) s.framesOver50 ++;
+
+		}
 		const gpuMs = this.gpu.timestamps ? ( this.renderer.info.render.timestamp || 0 ) + ( this.renderer.info.compute.timestamp || 0 ) : 0;
 		this.bench.onFrame( frameMs, gpuMs, cpuMs );
 		this.graph.push( frameMs, gpuMs );

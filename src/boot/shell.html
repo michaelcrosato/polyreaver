@@ -40,8 +40,7 @@ html, body { margin: 0; background: #0b1016; }
 <p>Boot complete. Choose your engine version.</p>
 <div class="boot-actions">
 <button type="button" data-boot-choice="game"><strong>Hack and slash</strong><span>Explore, fight, and build your character.</span></button>
-<button type="button" data-boot-choice="stress"><strong>City stress test</strong><span>Explore a procedural city with 100,000 citizens. Regenerate, inspect, and benchmark.</span></button>
-<button type="button" data-boot-choice="classic"><strong>Classic crowd stress test</strong><span>Plaza crowds, graphics experiments, and physics playground.</span></button>
+<button type="button" data-boot-choice="stress"><strong>Crowd stress test</strong><span>Procedural city or plaza, with graphics, animation, physics and benchmark controls.</span></button>
 </div>
 </section>
 <div class="boot-actions"><button id="boot-copy" type="button">Copy diagnostics</button><button id="boot-retry" type="button" hidden>Retry startup</button></div>
@@ -54,11 +53,11 @@ html, body { margin: 0; background: #0b1016; }
 <style>
 #engine-nav { position: fixed; z-index: 1000; bottom: max(8px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; gap: 6px; align-items: center; padding: 6px; border: 1px solid #657d8d; border-radius: 8px; background: #10202fee; color: #edf3f8; font: 12px system-ui; color-scheme: dark; }
 #engine-nav[hidden] { display: none; } #engine-nav select, #engine-nav button { width: auto; padding: 6px 8px; min-height: 36px; border: 1px solid #657d8d; border-radius: 4px; color: inherit; background: #172c3a; font: inherit; cursor: pointer; } #engine-nav select:focus-visible, #engine-nav button:focus-visible { outline: 2px solid #ffdc75; }
-body[data-running-mode="classic"]:not(.touch) #cam-bar { bottom: 72px; }
-body[data-running-mode="classic"].touch #claude-link { bottom: 60px; }
+body[data-running-mode="stress"]:not(.touch) #cam-bar { bottom: 72px; }
+body[data-running-mode="stress"].touch #claude-link { bottom: 60px; }
 body[data-running-mode="game"] #engine-nav { bottom: auto; top: 40px; }
 @media(max-width:700px) { #engine-nav { bottom: 0; width: 100%; box-sizing: border-box; justify-content: center; border-radius: 0; } #engine-nav label { display: none; } }
 </style>
 <nav id="engine-nav" aria-label="Switch game or stress test" hidden>
-<label for="engine-select">Experience</label><select id="engine-select"><option value="game">Hack and slash</option><option value="stress">City stress test</option><option value="classic">Classic crowd stress test</option></select><button id="engine-home" type="button">Choose engine</button>
+<label for="engine-select">Experience</label><select id="engine-select"><option value="game">Hack and slash</option><option value="stress">Crowd stress test</option></select><button id="engine-home" type="button">Choose engine</button>
 </nav>

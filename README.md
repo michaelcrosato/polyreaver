@@ -1,114 +1,116 @@
 # Polyreaver and WebGPU Crowd Stress Test
 
-Polyreaver combines a hack-and-slash game with a procedural city stress test built on
-**three.js r186 + WebGPU**. After startup, choose the game or explore a generated city
-with 100,000 persistent citizens, neighborhoods, streets, bridges, and benchmarking.
-The original plaza crowd benchmark remains available as **Classic crowd test**, with
-its individual graphics settings, animation systems, and Rapier physics tools.
+Polyreaver combines a hack-and-slash game with a crowd stress test built on
+**three.js r186 + WebGPU**. The stress test has two scenes: **Procedural city** and
+**Original plaza**. Both run the original engine with the same graphics, animation,
+physics, camera, crowd-size and benchmark controls.
 
-* **`webgpu-crowd-stress.html`** – the whole app in **one self-contained file** (three.js, code and CSS embedded). Finish startup, then choose the game or the procedural city stress test.
-* **`src/`** – the readable source (plain ES modules, no framework).
-* **`polyreaver.html`** – **Polyreaver**, the engine's showcase game (see below), also one self-contained file.
-* **`classic-crowd.html`** – the original plaza crowd/graphics/physics benchmark, also linked from the city controls.
-* **`city-demo.html`** – a procedurally generated city with 100,000 persistent GPU citizens plus the player.
+* **`webgpu-crowd-stress.html`** and **`polyreaver.html`** – self-contained downloads
+  containing the game and the unified stress test.
+* **`city-demo.html`** – the same stress test, starting in its procedural city.
+* **`classic-crowd.html`** – the same stress test, starting in its original plaza.
+* **`src/`** – readable source, plain ES modules with no framework.
 
 ## Standard startup and engine choice
 
-Open `/`, `/game.html`, `polyreaver.html`, or `webgpu-crowd-stress.html`. A small,
-dependency-free boot screen checks platform capabilities, initializes the WebGPU
-device, and verifies engine requirements. When it says **READY**, choose **Hack
-and slash**, **City stress test**, or **Classic crowd stress test**. City stress test opens the procedural city with 100,000
-citizens, city generation controls, overview, building inspection, and benchmarking.
-The **Experience** switcher stays visible in each test. Switch city ↔ classic or
-return to **Choose engine**. Switching reloads the same document and restores each
-test’s settings, so it also works from a single downloaded HTML file.
-Existing hash options apply to the engine you choose.
-The city entry uses the same checks, then starts the city directly.
+Open `/`, `/game.html`, `polyreaver.html`, or `webgpu-crowd-stress.html`. A small boot
+screen checks platform capabilities, initializes WebGPU and verifies engine
+requirements. At **READY**, choose **Hack and slash** or **Crowd stress test**.
+The **Experience** switcher changes between the game and stress test, restoring
+stress-test settings through optional session storage. **Choose engine** returns
+to the chooser. Within the stress test, use **Scene** to switch city ↔ plaza without
+reloading or changing the rest of your settings.
 
-The hosted boot shell is about 19 KB. Only the chosen engine is requested after
-checks pass. Standalone files contain all three engines as inert payloads; only the
-selected one is decoded and evaluated. UI templates are mounted at that point.
-The main loop starts only after renderer/system initialization and the first frame
-complete successfully.
+The hosted shell is about 19 KB and requests only the chosen engine after checks
+pass. Standalone files embed two inert engine payloads and decode only the selected
+one. UI templates mount at that point; the main loop starts after renderer/system
+initialization and a successful first frame. City generation runs in an inline
+worker, with a cooperative main-thread fallback for local files that forbid workers.
 
-Startup diagnostics include version, a reproducible content build ID, browser/platform,
-renderer, available adapter details, capabilities, stage history, and errors. Failures
-retain the report on screen with a retry button. **Copy diagnostics** also reveals a
-manual-copy box if clipboard permissions are unavailable. A failed report is retained
-locally when storage permits. Storage denial is reported but does not prevent play.
+Startup diagnostics retain version, content build ID, platform, adapter, capability
+checks, stage history and errors. Failure shows copy/retry controls. Storage denial
+does not prevent play. Both engines require WebGPU compute/storage; the loader tries
+core and compatibility adapters and reports WebGL2 availability when WebGPU fails.
+See [the boot contract](docs/BOOT.md) for stage codes and failure handling.
 
-Both engines require WebGPU compute/storage; the loader tries core and compatibility
-adapters. It reports WebGL2 availability on failure, but WebGL2 cannot run these engines.
-There is no silent renderer downgrade. See [the reusable boot contract](docs/BOOT.md)
-for stage codes, integration, failure behavior, and validation coverage.
+`npm run build` updates `dist/` and all four standalone downloads. `build:game` and
+`build:city` remain aliases. `/city.html`, `/city-demo.html`, `/classic.html`,
+`/classic-crowd.html` and old `?engine=classic` links all launch `src/main.js`.
+An explicit `#scene=city` or `#scene=plaza` overrides the entry's default.
 
-`npm run build` builds the hosted site in `dist/` and refreshes all four standalone
-HTMLs. `build:game` and `build:city` are compatibility aliases for the same build.
-`npm run test:boot` verifies both hosted choices, deferred requests, phone/keyboard UI,
-failed device/module/system/first-frame initialization, timeouts, device loss, storage
-denial, compatibility retry, and JavaScript-disabled diagnostics.
+## Procedural city in the original stress test
 
-## Procedural city
+Open **`city-demo.html`**, or run `npm run dev -- --port 5190` and visit
+**http://localhost:5190/city.html**. Under **Scene**, select **Procedural city** or
+**Original plaza**. Enter a **City seed** to generate a new layout; **Regenerate
+city** rebuilds the current seed, and **City overview** frames the whole city.
+Changing scenes or regenerating preserves engine settings. Presets also preserve
+scene and seed. Reports and shared links include the scene and seed.
 
-Open **`city-demo.html`** directly, or run `npm run dev -- --port 5190` and visit
-**http://localhost:5190/city.html**. `npm run build:city` rebuilds the self-contained
-city file, including its generation worker. The engine chooser is at `/`.
+The seeded 2,048 × 2,048 m city reuses the existing generator: neighborhoods,
+buildings with facade detail, civic sites, parks, sidewalks, crossings and a canal
+with three bridges. Ground patterns, buildings and street props use the selected
+shading model. Lighting, shadows, sky, fog, post effects and resolution work through
+the original controls. Trees and lamps can topple in Rapier; buildings stay static.
+The hero slides along buildings and canal banks even with physics off.
 
-The 2,048 × 2,048 m city has seeded neighborhoods, rectangular buildings, civic
-services, parks, sidewalks, signals, a canal with three bridges, small vehicle traffic,
-and 100,000 persistent citizens. Citizens retain home/work/leisure addresses, follow
-shared GPU routes, wait at crossings, and reserve outdoor destination slots. Service
-buildings are destinations and game-ready data; civic economies and interiors are
-future work.
+The original GPU crowd owns all agents, so both scenes support the full crowd-size
+and allocation ranges (up to four million agents, subject to GPU limits), all four
+character models, both rendering paths, six animation systems and all behaviors.
+There is no separate 100K citizen cap. Density changes the initial radial spread;
+when it reaches the finite city boundary, the spread is compressed to fit the map.
+Crowd size includes the player, as in the original test.
 
-**Controls:** WASD/arrows walk, Shift run, drag pan/orbit, wheel zoom, Q/E rotate,
-1–5 cameras, M/Tab overview, C find player, P pause, H hide UI. Click a building for
-its address/capacities and a highlighted route. Touch movement uses the left joystick.
-Use the **City** tab for seed/regeneration, population, and cameras. The **Engine
-options** tab reuses all 67 controls and all ten presets from the classic test:
-shading/lighting, shadows, environment, resolution/upscaling, anti-aliasing, post
-processing, character models, animation systems, rendering paths, and Rapier physics.
-It also includes maximum-crowd and effect-cost benchmarks, reports, and settings links.
+This city integration uses the original free-wandering behaviors with a conservative
+walking-surface atlas and wall sliding. It does not run the previous city's separate
+home/work schedules, address reservations, crossing queues, traffic simulation or
+building-inspection UI. City layout and address data remain available in
+`app.world.city` for future extensions. The independent CityApp, options adapter and
+city GPU simulation have been removed, leaving one stress-test App to maintain.
 
-The city retains its 100,000-citizen scenario limit (classic can go into the millions).
-Density adjusts lane concentration; activity adjusts destination dwell time;
-converge/flee follow streets to addresses near/far from the player. Physics moves are
-projected onto street corridors so citizens retain valid navigation. Trees and lamps
-can topple; buildings stay static. These differences are explained beside the controls.
-Settings persist when regenerating or switching tests. Far citizens remain cheap
-billboards with GPU LOD; the direct path draws the selected full character model.
-
-Ordinary buildings use ten triangles. Distant citizens use two-triangle camera-facing
-markers and nearby citizens use the existing animated crowd models. City generation,
-collision and pedestrian navigation all derive from the same layout. The browser
-reports live citizen counts, geometry, allocation budgets, and simulation tick drops.
+**Controls:** WASD/arrows walk, Shift run, R wave, Space cheer, F dance; drag pan/orbit,
+wheel zoom, Q/E rotate, 1–5 cameras, C recenter, P settings, H hide UI. Touch movement
+uses the left joystick. The original presets, effect-cost benchmark, maximum-crowd
+search, standard 1080p benchmark, physics actions, reports and settings links remain.
+Standard benchmark results identify scene and seed; compare runs with the same scene.
 
 ```bash
-npm run test:city                 # 50 seeds, geometry/capacity and route checks
-npm run build:city
-npm run smoke:city                # offline software-WebGPU correctness + screenshots
-npm run smoke:city-options        # presets, graphics/physics controls and switching
-npm run bench:city                # 4 scenarios, fixed 1080p, real GPU required
+npm run lint
+npm run test:city                  # seeded geometry, routes and walk-map validation
+npm run build
+npm test -- --quick                # unified city/plaza controls and regression checks
+npm test                          # full city presets, render/animation/shading/physics matrix
+npm test -- --suite boot           # production startup, offline files and route aliases
+npm test -- --suite plaza          # full original plaza smoke tests + command bridge
+npm test -- --suite zoom           # cold zoom/rotation: no new shaders, pipelines or geometry uploads
+npm run bench:city                 # standard 1080p benchmark on a real GPU
 ```
 
-The 100K/1080p/60 fps target requires a real-device benchmark. Software SwiftShader
-testing establishes correctness and buffer limits, not hardware frame rates. In WSL,
-open the local city page in **Windows Chrome/Edge**, keep it in the foreground, and
-click **Benchmark** at 100,000 citizens. Each of four scenarios warms up for 10 seconds
-and records 60 seconds; copy the JSON from the report box. The report includes adapter,
-resolution, per-scenario timings, geometry, allocations, and dropped simulation time.
-The traversal scenario concentrates 512 citizens on one bridge to test congestion.
-The benchmark restores citizen and player state afterward.
+Software SwiftShader verifies rendering and buffer limits, not hardware frame rates.
+For performance, open the city in a WebGPU-capable hardware browser and click
+**Standard benchmark**. `bench:city -- --software` checks the reporting procedure
+without making a performance claim. Browser scripts reuse installed Chrome when
+Playwright's pinned browser is absent; `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` selects
+another installed executable. `smoke:city` and `smoke:city-options` both run the
+unified scene checks. The original city proposal is retained as historical context
+in [docs/CITY_PLAN.md](docs/CITY_PLAN.md).
 
-To check the benchmark runner with software rendering, without making a performance
-claim: `npm run bench:city -- --software --warmup 0 --seconds 1`.
-Browser scripts can use installed Chrome when the pinned Playwright browser is absent;
-`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` selects another installed executable.
+The stress test prepares every active city chunk during the **WARM** loading stage,
+including chunks outside the opening view. Compute and scene shaders compile
+asynchronously; a hidden render primes shadows and post-processing before control
+passes to the player. Normal frustum culling resumes for gameplay. Scene and rendering
+setting changes repeat preparation before rendering resumes. This adds preparation
+time and makes active scene buffers resident earlier, avoiding the first-use work
+that would otherwise land on the first zoom-out.
 
-The specification is [docs/CITY_PLAN.md](docs/CITY_PLAN.md). The debugging API on
-`window.city` exposes `describe()`, `validate({full:true})` (all-agent GPU reduction),
-`sampleCitizens(ids)` (at most 256), `regenerate(config)`, `pause(value)`,
-`stepTicks(n)` (explicit validation), and `benchmark(options)`.
+The copied report retains the worst visible play-session frame and CPU time after
+the FPS counter has recovered. `npm test -- --suite zoom --hardware --url <url>`
+records zoom frame-time percentiles on a hardware browser in
+`artifacts/rendering/zoom.json`; its default software run checks resource reuse.
+At 144 Hz the frame budget is 6.94 ms. Loading preparation removes first-use stalls;
+the GPU still needs to draw the wider view within that budget. If a warmed view
+stays slow, compare GPU LOD, crowd size, shadow quality and resolution using the
+same seed, settings and camera path.
 
 ## Polyreaver: the showcase game
 
@@ -129,7 +131,7 @@ A fast isometric hack-and-slash built on this engine, in the spirit of Path of E
 | For AI agents | [`docs/AGENTS.md`](docs/AGENTS.md): JSON command API (`game.api`), the Workshop asset galleries, a playtest bot, a headless balance sim, the Claude link. The contract: [`docs/GAME.md`](docs/GAME.md) |
 | Headless | `npm run sim -- --depth 1-20` plays the real game in Node with the bot and prints a balance table |
 
-## Running the classic crowd benchmark
+## Running the crowd benchmark
 
 | Where | How |
 |---|---|
@@ -326,6 +328,15 @@ Cost: ●○○○ cheap → ●●●● very heavy. *Bound by* is the resource
 (full-screen buffer reads/writes), **compute**, **cpu**, or **compile** (toggling it recompiles
 shaders, so expect a one-off hitch).
 
+### Scene
+
+| Setting | Default | Effect |
+|---|---|---|
+| Scene | Procedural city | Switch city/plaza inside the same engine; preserve the controls below. |
+| City seed | harbor-100k | Generate a deterministic 2 km city. |
+| Regenerate city | action | Rebuild the current seed without resetting engine settings. |
+| City overview | action | Frame the city; recenter, movement or camera input returns to normal viewing. |
+
 ### Crowd
 
 | Setting | Default | Cost | Bound by | What it does / why it costs |
@@ -338,7 +349,7 @@ shaders, so expect a one-off hitch).
 | Animation system | Procedural sine (per vertex) | ●●○○ moderate | vertex / compute / memory | Six ways to animate the same crowd, all driving the same 8 activities. Procedural: sine curves per joint, cheapest, states pop. Keyframe: hand-keyed clips (walk contact/passing poses, jumps, disco points...) sampled per vertex from a table, with cross-fades - nicer motion, more ALU per vertex. Skeletal: the clips are sampled ONCE per agent in a compute pass that builds 10 bone matrices (480 bytes/agent/frame), then the vertex shader skins with smooth weights (elbows and knees bend instead of hinging) - the standard game-engine approach, heavy on memory and bandwidth. Baked bone texture: the same bone matrices, but computed once at load time for every clip key and stored in one 120 KB texture; the vertex shader fetches the two keys around the phase of each agent, interpolates and skins - no compute pass and no memory per agent (so no 131k cap), paid for with 12 texture reads per vertex (24 while cross-fading). The classic way to skin huge crowds. VAT: every vertex position of every clip frame is baked into a float texture at load time - the vertex shader just reads it back, zero joint maths. **Mobile:** Skeletal needs storage buffers in the vertex stage (some older phones have none - it falls back to keyframe) and ~63 MB for 131k agents. The baked bone texture needs neither (plain texture reads, 120 KB in total), so it brings smooth skinning to those phones too, but its 12-24 reads per vertex add up on vertex-limited GPUs - pair it with low-poly models. VAT and procedural remain the mobile-friendly choices. |
 | Cross-fade between activities | on | ●○○○ cheap | vertex | Keyframe / skeletal / baked bones / VAT blend the outgoing and incoming clip over 0.25 s instead of snapping. Costs a second clip sample per vertex (or per agent for skeletal; baked bones only pay it while an agent is fading). |
 | Behaviour | Wander (random activities) | ●○○○ cheap | compute | All simulation runs in one compute shader, so behaviour changes are free on the CPU. "Converge" packs everyone around the hero: huge overdraw hot-spot. |
-| Density (people / m²) | 0.35 | ●○○○ cheap | fill | How tightly the crowd is packed. Denser crowds overlap more on screen (overdraw) and the world gets smaller. |
+| Density (people / m²) | 0.35 | ●○○○ cheap | fill | How tightly the crowd is packed. Denser crowds overlap more on screen (overdraw). The plaza shrinks; the city crowd spreads over clear ground, compressed at the finite map boundary. |
 | Activity (share walking) | 0.6 | ●○○○ free | compute | Chance that an agent picks walking/running over standing activities when its timer runs out. |
 | Walk speed | 1 | ●○○○ free | compute | Global speed multiplier. |
 
@@ -470,7 +481,7 @@ animation) and *Physics playground* (Rapier bodies raining on a colliding crowd)
 
 GitHub runs two automatic jobs (*Actions* tab): **Build** (lint, city validation, all builds, boot browser checks and a short headless
 game simulation on every push; the built HTML files are downloadable from the run) and **Smoke test**
-(classic crowd, game and city smoke tests, nightly if something was pushed that day, or on demand with *Run workflow*). The smoke test proves things run, not how
+(plaza, game and unified city scene smoke tests, nightly if something was pushed that day, or on demand with *Run workflow*). The smoke test proves things run, not how
 fast: the software GPU is a CPU rasteriser.
 
 ## Project layout
@@ -489,7 +500,10 @@ src/crowd/anim.js       the six animation systems (procedural, keyframe, skeleta
 src/crowd/clips.js      hand-keyed animation clips + CPU pose chain (bone texture + VAT baking)
 src/crowd/models.js     procedural low-poly character tiers (+ skin weights)
 src/crowd/collide.js    GPU spatial-hash crowd collisions
-src/world.js            World: plaza, props, settings entry points
+src/world.js            World: city/plaza geometry, props, shared lighting and settings
+src/app/scene.js        seeded city generation, scene switching and settings preservation
+src/city/               shared city generator, geometry, surface data and Rapier adapter
+src/crowd/surface.js    optional city walking constraints in the original simulation
 src/world/              prop geometry, shading models + ground, lights/shadows/sky/fog
 src/physics.js          PhysicsDemo: Rapier world lifecycle, hero controller, per-step order
 src/physics/            bodies + spawn patterns, crowd coupling, prop colliders, debug draw
