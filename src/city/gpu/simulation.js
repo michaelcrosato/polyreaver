@@ -249,7 +249,7 @@ export function buildCityKernels( crowd, profile ) {
 		} );
 		const oldState = rd.w.mod( 8 ), changed = state.notEqual( oldState );
 		ad.x.assign( select( changed, oldState, ad.x ) ); ad.z.assign( select( changed, rd.y, ad.z ) );
-		ad.y.assign( select( changed, float( 0 ), min( ad.y.add( u.dt.mul( 4 ) ), 1 ) ) ); ad.w.assign( float( i ) );
+		ad.y.assign( select( u.blendOn.lessThan( .5 ), float( 1 ), select( changed, float( 0 ), min( ad.y.add( u.dt.mul( 4 ) ), 1 ) ) ) ); ad.w.assign( float( i ) );
 		rd.y.assign( rd.y.add( select( u.behaviour.equal( 5 ).and( i.greaterThan( 0 ) ), float( 0 ), select( state.equal( 1 ), speed.mul( u.dt ).mul( 4.8 ), select( state.equal( 2 ), speed.mul( u.dt ).mul( 3.2 ), u.dt.mul( 2.5 ) ) ) ) ).mod( TAU ) );
 		const quantized = floor( fract( heading.div( TAU ) ).mul( 256 ) ).mod( 256 );
 		rd.w.assign( state.add( quantized.mul( 8 ) ).add( seed.mul( 2048 ) ) ); sd.w.assign( heading );

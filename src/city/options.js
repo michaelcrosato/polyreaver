@@ -205,6 +205,7 @@ function resize( app ) {
 async function action( app, id ) {
 
 	if ( id === 'benchStop' ) { app.bench.stop(); app.cancelBenchmark = true; return; }
+	if ( app.benchmarking && [ 'benchCrowd', 'benchFx' ].includes( id ) ) throw new Error( 'Stop the city benchmark before starting another benchmark.' );
 	if ( id === 'benchCrowd' ) return app.bench.findMaxCrowd( Number( app.ui.benchTarget.value ) );
 	if ( id === 'benchFx' ) return app.bench.measureEffects();
 	if ( id === 'benchStandard' ) {

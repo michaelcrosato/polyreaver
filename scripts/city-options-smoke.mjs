@@ -142,6 +142,21 @@ try {
 		}
 
 	} );
+	await step( 'cross-fade toggle applies immediately to a changed activity', async () => {
+
+		await page.evaluate( async () => {
+
+			window.city.pause( true );
+			await window.city.set( 'behaviour', 3 ); await window.city.stepTicks( 1 );
+			await window.city.set( 'animBlend', false );
+			await window.city.set( 'behaviour', 4 ); await window.city.stepTicks( 1 );
+
+		} );
+		const blend = await page.evaluate( async () => new Float32Array( await window.city.renderer.getArrayBufferAsync( window.city.crowd.animBuf.value, null, 16, 16 ) )[ 1 ] );
+		assert.equal( blend, 1 );
+		await page.evaluate( async () => { await window.city.set( 'animBlend', true ); await window.city.set( 'behaviour', 0 ); window.city.pause( false ); } );
+
+	} );
 	await step( 'effect benchmark cancellation restores settings', async () => {
 
 		await page.evaluate( () => { window.__fx = window.city.bench.measureEffects(); } ); await frames( 4 );
@@ -158,6 +173,8 @@ try {
 		await page.locator( '#benchmark' ).click();
 		await page.waitForFunction( () => window.city.benchmarking );
 		await page.getByRole( 'tab', { name: 'Engine options', exact: true } ).click();
+		await page.getByRole( 'button', { name: '▶ Find max crowd', exact: true } ).click();
+		assert.equal( await page.evaluate( () => window.city.bench.running ), false );
 		await page.getByRole( 'button', { name: '■ Stop', exact: true } ).click();
 		await page.waitForFunction( () => ! window.city.benchmarking, null, { timeout: 120000 } );
 		assert.equal( await page.evaluate( () => window.__boot.status ), 'running' );
