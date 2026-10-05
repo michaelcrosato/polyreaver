@@ -10,6 +10,7 @@ import { addNode, addConnection, buildRoutes, nextEdge, referenceRoute } from '.
 import { contains, overlaps, edgeContains, makeSpatialIndex } from '../src/city/geometry.js';
 import { packCity } from '../src/city/packing.js';
 import { CityCollision } from '../src/city/player.js';
+import { TrafficSimulation, junctionPath, junctionPose, CAR_WIDTH, CAR_LENGTH } from '../src/city/traffic-sim.js';
 
 function independentDistance( graph, source, destination, cluster = - 1 ) {
 
@@ -211,5 +212,93 @@ test( 'stress-test walk atlas projects every cell to safe ground without agent b
 
 	}
 	assert.throws( () => buildWalkMap( { size: 4, data: new Uint8Array( 64 ) } ), /no safe walking surface/ );
+
+} );
+
+function roadFootprint( city ) {
+
+	const roads = city.roads.filter( ( r ) => r.kind !== 'alley' ), index = makeSpatialIndex( roads, 32 );
+	return ( pose ) => {
+
+		const sin = Math.sin( pose.heading ), cos = Math.cos( pose.heading );
+		// Corners, edge midpoints and the center check the body, not just its root.
+		for ( const x of [ - CAR_WIDTH / 2, 0, CAR_WIDTH / 2 ] ) for ( const z of [ - CAR_LENGTH / 2, 0, CAR_LENGTH / 2 ] ) {
+
+			const px = pose.x + x * cos + z * sin, pz = pose.z - x * sin + z * cos;
+			const candidates = index.cells.get( `${Math.floor( px / 32 )},${Math.floor( pz / 32 )}` ) || [];
+			assert.ok( candidates.some( ( id ) => contains( roads[ id ], px, pz ) ), `Car footprint off road at ${px},${pz}` );
+
+		}
+
+	};
+
+}
+
+test( 'every car turn stays on road including canal junctions across city seeds', () => {
+
+	for ( let seed = 0; seed < 3; seed ++ ) {
+
+		const city = generateCity( { seed: `car-roads-${seed}`, riverColumn: [ 5, 8, 10 ][ seed ], population: 1 } );
+		const sim = new TrafficSimulation( city, 512 ), onRoad = roadFootprint( city );
+		for ( const edge of sim.spawnEdges ) {
+
+			const options = sim.out.get( edge.b ).filter( ( id ) => id !== edge.reverse );
+			assert.ok( options.length > 0, 'No dead ends or forced U-turns' );
+			for ( const id of options ) {
+
+				const path = junctionPath( sim.graph, edge.id, id );
+				for ( let i = 0; i <= 32; i ++ ) onRoad( junctionPose( path, i / 32 ) );
+
+			}
+
+		}
+		for ( const state of sim.states ) onRoad( state );
+		for ( let step = 0; step < 300; step ++ ) {
+
+			sim.update( step % 23 === 0 ? .7 : .1 );
+			for ( const state of sim.states ) onRoad( state );
+
+		}
+
+	}
+
+} );
+
+test( 'cars stop on red, maintain following gaps, and proceed through a green junction', () => {
+
+	const city = generateCity( { seed: 'traffic-lights', population: 1 } ), sim = new TrafficSimulation( city, 2 );
+	const edge = sim.spawnEdges.find( ( e ) => e.dx === 1 && sim.graph.nodes[ e.b ].signal >= 0 );
+	const node = sim.graph.nodes[ edge.b ], signal = city.signals[ node.signal ];
+	for ( const [ i, state ] of sim.states.entries() ) {
+
+		state.edge = edge.id; state.t = edge.length - 4 - i * 10; state.next = sim.nextEdge( state ); state.speed = 10;
+
+	}
+	sim.time = 16 - signal.offset; sim.update( 2 );
+	assert.equal( sim.states[ 0 ].t, edge.length - 4 );
+	assert.equal( sim.states[ 0 ].turn, null );
+	assert.ok( sim.states[ 0 ].t - sim.states[ 1 ].t >= CAR_LENGTH + 1.99 );
+	sim.time = 28 - signal.offset; sim.update( .1 );
+	assert.ok( sim.states[ 0 ].turn );
+	assert.equal( sim.states[ 1 ].turn, null );
+	assert.equal( sim.junctions.get( edge.b ), 0 );
+	const destination = sim.states[ 0 ].next;
+	sim.update( 2 );
+	assert.equal( sim.states[ 0 ].edge, destination );
+	assert.ok( sim.states[ 0 ].t > 4 );
+
+} );
+
+test( 'car count is bounded, spawns deterministically, and zero time leaves traffic still', () => {
+
+	const city = generateCity( { population: 1 } ), a = new TrafficSimulation( city ), b = new TrafficSimulation( city );
+	assert.deepEqual( a.states, b.states );
+	const poses = a.states.map( ( s ) => [ s.x, s.z, s.heading ] );
+	a.update( 0 ); a.update( - 1 ); a.update( NaN );
+	assert.deepEqual( a.states.map( ( s ) => [ s.x, s.z, s.heading ] ), poses );
+	a.setCount( 0 ); assert.equal( a.states.length, 0 ); a.update( 1 );
+	a.setCount( 128 ); assert.deepEqual( a.states.map( ( s ) => [ s.x, s.z, s.heading ] ), poses );
+	a.setCount( 1000000 ); assert.equal( a.states.length, 512 );
+	assert.equal( new Set( a.states.map( ( s ) => s.edge ) ).size, a.states.length );
 
 } );

@@ -367,6 +367,7 @@ export class World {
 	// --- per frame -----------------------------------------------------------
 	update( dt, focus, camera, viewExtent ) {
 
+		this.cityView?.update( dt );
 		updateSun( this, focus, viewExtent );
 
 		const u = this.u;

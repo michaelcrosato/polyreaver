@@ -61,9 +61,16 @@ There is no separate 100K citizen cap. Density changes the initial radial spread
 when it reaches the finite city boundary, the spread is compressed to fit the map.
 Crowd size includes the player, as in the original test.
 
+Low-poly cars drive in street lanes and cross the canal on the existing bridges.
+They follow curved intersection paths, stop at traffic lights and keep a gap to
+the car ahead. Under **Scene → Cars (city roads)**, choose **Off**, **64**, **128**
+(default), **256** or **512**. Traffic is independent of crowd size and physics;
+scene changes, city regeneration and shared links preserve the car-count setting.
+Cars use one instanced fleet and share the selected shading and shadow controls.
+
 This city integration uses the original free-wandering behaviors with a conservative
 walking-surface atlas and wall sliding. It does not run the previous city's separate
-home/work schedules, address reservations, crossing queues, traffic simulation or
+home/work schedules, address reservations, pedestrian crossing queues or
 building-inspection UI. City layout and address data remain available in
 `app.world.city` for future extensions. The independent CityApp, options adapter and
 city GPU simulation have been removed, leaving one stress-test App to maintain.

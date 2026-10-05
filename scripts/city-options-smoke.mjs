@@ -59,6 +59,24 @@ try {
 	assert.deepEqual( ( await page.evaluate( () => [ ...window.app.ui.controls.keys() ] ) ).sort(), keys.sort() );
 	assert.equal( await page.evaluate( () => !! window.city ), false );
 	const baseline = await page.evaluate( () => ( { ...window.app.S } ) );
+	await step( 'road cars render, move, and respond to their count control', async () => {
+
+		const start = await page.evaluate( () => {
+
+			const traffic = window.app.world.cityView.traffic;
+			return { count: traffic.mesh.count, matrices: [ ...traffic.mesh.instanceMatrix.array.slice( 0, traffic.mesh.count * 16 ) ], geometry: traffic.mesh.geometry.uuid };
+
+		} );
+		assert.equal( start.count, baseline.carCount ); await frames( 6 );
+		assert.notDeepEqual( await page.evaluate( () => [ ...window.app.world.cityView.traffic.mesh.instanceMatrix.array.slice( 0, window.app.S.carCount * 16 ) ] ), start.matrices );
+		await page.getByLabel( 'Cars (city roads)', { exact: true } ).selectOption( '0' );
+		await page.waitForFunction( () => window.app.world.cityView.traffic.mesh.count === 0 && ! window.app.renderPreparing );
+		await page.getByLabel( 'Cars (city roads)', { exact: true } ).selectOption( '512' );
+		await page.waitForFunction( () => window.app.world.cityView.traffic.mesh.count === 512 && ! window.app.renderPreparing );
+		assert.equal( await page.evaluate( () => window.app.world.cityView.traffic.mesh.geometry.uuid ), start.geometry );
+		await apply( baseline );
+
+	} );
 	await step( `all ${keys.length} original and scene controls present in one App`, async () => {
 
 		await page.getByRole( 'button', { name: 'Shading & lighting' } ).click();

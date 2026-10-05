@@ -73,6 +73,7 @@ export function applyWorld( app ) {
 	if ( world.skyMode !== S.sky ) world.setSky( S.sky );
 	world.setFog( S.fog );
 	world.setProps( S.props );
+	world.cityView?.setCarCount( S.carCount );
 	if ( world.groundDetail !== S.groundDetail ) world.setGroundDetail( S.groundDetail );
 
 }
