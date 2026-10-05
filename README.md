@@ -63,10 +63,14 @@ Crowd size includes the player, as in the original test.
 
 Low-poly cars drive in street lanes and cross the canal on the existing bridges.
 They follow curved intersection paths, stop at traffic lights and keep a gap to
-the car ahead. Under **Scene → Cars (city roads)**, choose **Off**, **64**, **128**
-(default), **256** or **512**. Traffic is independent of crowd size and physics;
+the car ahead in small fleets. Under **Scene → Cars (city roads)**, choose **Off**
+or counts from **64** up to **512K (524,288)**; the default is **128**. Fleets over
+512 cars use GPU road traversal, visibility culling and simpler distant models,
+with no per-car CPU updates. Cars may overlap at stress-test densities, but their
+paths remain on roads. Traffic is independent of crowd size and physics;
 scene changes, city regeneration and shared links preserve the car-count setting.
-Cars use one instanced fleet and share the selected shading and shadow controls.
+Cars use instanced batches and share the selected shading and shadow controls.
+The HUD and copied report show the fleet count and GPU-visible car count.
 
 This city integration uses the original free-wandering behaviors with a conservative
 walking-surface atlas and wall sliding. It does not run the previous city's separate
@@ -85,6 +89,7 @@ Standard benchmark results identify scene and seed; compare runs with the same s
 npm run lint
 npm run test:city                  # seeded geometry, routes and walk-map validation
 npm run build
+npm run test:cars                  # real 512K GPU fleet, road confinement and scene lifecycle
 npm test -- --quick                # unified city/plaza controls and regression checks
 npm test                          # full city presets, render/animation/shading/physics matrix
 npm test -- --suite boot           # production startup, offline files and route aliases

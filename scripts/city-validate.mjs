@@ -10,7 +10,7 @@ import { addNode, addConnection, buildRoutes, nextEdge, referenceRoute } from '.
 import { contains, overlaps, edgeContains, makeSpatialIndex } from '../src/city/geometry.js';
 import { packCity } from '../src/city/packing.js';
 import { CityCollision } from '../src/city/player.js';
-import { TrafficSimulation, junctionPath, junctionPose, CAR_WIDTH, CAR_LENGTH } from '../src/city/traffic-sim.js';
+import { TrafficSimulation, junctionPath, junctionPose, CAR_WIDTH, CAR_LENGTH, MAX_CARS, carCount, packTrafficRoads } from '../src/city/traffic-sim.js';
 
 function independentDistance( graph, source, destination, cluster = - 1 ) {
 
@@ -300,5 +300,29 @@ test( 'car count is bounded, spawns deterministically, and zero time leaves traf
 	a.setCount( 128 ); assert.deepEqual( a.states.map( ( s ) => [ s.x, s.z, s.heading ] ), poses );
 	a.setCount( 1000000 ); assert.equal( a.states.length, 512 );
 	assert.equal( new Set( a.states.map( ( s ) => s.edge ) ).size, a.states.length );
+	assert.equal( carCount( 524288 ), MAX_CARS ); assert.equal( carCount( 1000000 ), MAX_CARS );
+	assert.equal( carCount( - 1 ), 0 ); assert.equal( carCount( NaN ), 128 );
+
+} );
+
+test( 'GPU road table preserves every legal lane and junction without per-car route allocations', () => {
+
+	const city = generateCity( { population: 1 } ), { data, edges, graph } = packTrafficRoads( city );
+	assert.ok( data.byteLength < 65536 );
+	for ( const [ i, edge ] of edges.entries() ) {
+
+		const row = i * 12, start = graph.nodes[ edge.a ], end = graph.nodes[ edge.b ];
+		assert.deepEqual( [ ...data.slice( row, row + 4 ) ], [ start.x, start.z, edge.dx, edge.dz ].map( Math.fround ) );
+		assert.equal( data[ row + 4 ], Math.fround( edge.length ) );
+		assert.ok( data[ row + 5 ] > 0 && data[ row + 5 ] <= 3 );
+		assert.equal( data[ row + 7 ], end.signal < 0 ? 0 : 1 );
+		for ( let exit = 0; exit < data[ row + 5 ]; exit ++ ) {
+
+			const next = edges[ data[ row + 8 + exit ] ];
+			assert.equal( next.a, edge.b ); assert.notEqual( next.id, edge.reverse ); assert.notEqual( next.kind, 'alley' );
+
+		}
+
+	}
 
 } );

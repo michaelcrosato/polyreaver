@@ -3,9 +3,17 @@
 import { RNG } from '../game/core/rng.js';
 import { laneGraph } from './lanes.js';
 
-export const MAX_CARS = 512;
+export const MAX_CARS = 524288;
+export const CPU_CARS = 512;
 export const CAR_WIDTH = 1.9, CAR_LENGTH = 3.8;
-const LANE = 1.4, JUNCTION = 4, GAP = CAR_LENGTH + 2;
+export const LANE = 1.4, JUNCTION = 4;
+const GAP = CAR_LENGTH + 2;
+
+export function carCount( count ) {
+
+	return Number.isFinite( count ) ? Math.max( 0, Math.min( MAX_CARS, Math.floor( count ) ) ) : 128;
+
+}
 
 export function signalPhase( signal, time ) {
 
@@ -73,7 +81,7 @@ export class TrafficSimulation {
 
 	setCount( count ) {
 
-		count = Number.isFinite( count ) ? Math.max( 0, Math.min( MAX_CARS, Math.floor( count ) ) ) : 128;
+		count = Math.min( CPU_CARS, carCount( count ) );
 		if ( count === this.states?.length ) return;
 		this.junctions.clear();
 		this.states = Array.from( { length: Math.min( count, this.spawnEdges.length ) }, ( _, id ) => {
@@ -166,5 +174,22 @@ export class TrafficSimulation {
 		for ( const state of this.states ) this.pose( state );
 
 	}
+
+}
+
+// Dense GPU road table: origin/direction, length/exit-count/signal, then up to
+// three legal successors. No per-car objects or route arrays are needed.
+export function packTrafficRoads( city ) {
+
+	const reference = new TrafficSimulation( city, 0 ), edges = reference.spawnEdges;
+	const ids = new Map( edges.map( ( e, i ) => [ e.id, i ] ) ), data = new Float32Array( edges.length * 12 );
+	for ( const [ i, e ] of edges.entries() ) {
+
+		const a = reference.graph.nodes[ e.a ], b = reference.graph.nodes[ e.b ];
+		const exits = reference.out.get( e.b ).filter( ( id ) => id !== e.reverse ).map( ( id ) => ids.get( id ) );
+		data.set( [ a.x, a.z, e.dx, e.dz, e.length, exits.length, b.signal < 0 ? 0 : city.signals[ b.signal ].offset, b.signal < 0 ? 0 : 1, ...exits ], i * 12 );
+
+	}
+	return { data, edges, graph: reference.graph };
 
 }

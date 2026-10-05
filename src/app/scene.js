@@ -58,7 +58,7 @@ export function regenerateScene( app ) {
 				const map = buildWalkMap( city.surface );
 				texture = new THREE.DataTexture( map.data, map.size, map.size, THREE.RGBAFormat );
 				texture.magFilter = texture.minFilter = THREE.NearestFilter; texture.generateMipmaps = false; texture.needsUpdate = true;
-				view = new CityWorld( city, app.scene );
+				view = new CityWorld( city, app.scene, app.renderer );
 
 			}
 			if ( app.physicsStartup ) await app.physicsStartup;

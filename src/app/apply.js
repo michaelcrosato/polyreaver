@@ -5,6 +5,7 @@ import * as THREE from 'three/webgpu';
 import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
 import { needsPost } from '../post.js';
 import { TONE } from './config.js';
+import { carCount } from '../city/traffic-sim.js';
 
 export function applyCrowd( app ) {
 
@@ -73,7 +74,7 @@ export function applyWorld( app ) {
 	if ( world.skyMode !== S.sky ) world.setSky( S.sky );
 	world.setFog( S.fog );
 	world.setProps( S.props );
-	world.cityView?.setCarCount( S.carCount );
+	S.carCount = carCount( S.carCount ); world.cityView?.setCarCount( S.carCount );
 	if ( world.groundDetail !== S.groundDetail ) world.setGroundDetail( S.groundDetail );
 
 }

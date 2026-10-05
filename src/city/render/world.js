@@ -47,7 +47,7 @@ function groundMaterial( atlas, detail ) {
 
 export class CityWorld {
 
-	constructor( city, scene ) {
+	constructor( city, scene, renderer ) {
 
 		this.city = city; this.scene = scene;
 		this.group = new THREE.Group(); this.group.name = 'Procedural city'; scene.add( this.group );
@@ -141,13 +141,13 @@ export class CityWorld {
 		this.resetPropMatrices();
 		this.trees.computeBoundingSphere(); this.lamps.computeBoundingSphere();
 		this.addMarkings();
-		this.traffic = new CityTraffic( city );
-		for ( const mesh of [ this.traffic.mesh, this.traffic.signalMesh ] ) {
+		this.traffic = new CityTraffic( city, renderer );
+		for ( const mesh of [ ...this.traffic.carMeshes, this.traffic.signalMesh ] ) {
 
 			this.materials.add( mesh.material ); this.add( mesh );
 
 		}
-		this.staticTriangles = this.meshes.reduce( ( sum, m ) => sum + ( m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count ) / 3 * ( m.isInstancedMesh ? m.count : 1 ), 0 );
+		this.baseTriangles = this.meshes.filter( ( m ) => ! m.userData.cityCars ).reduce( ( sum, m ) => sum + ( m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count ) / 3 * ( m.isInstancedMesh ? m.count : 1 ), 0 );
 		this.bytes = city.surface.data.byteLength + this.meshes.reduce( ( n, m ) => n + Object.values( m.geometry.attributes ).reduce( ( sum, a ) => sum + a.array.byteLength, 0 ) + ( m.instanceMatrix?.array.byteLength || 0 ) + ( m.instanceColor?.array.byteLength || 0 ), 0 );
 
 	}
@@ -203,6 +203,7 @@ export class CityWorld {
 
 			const material = makeMaterial( kind, { color: old.color, vertexColors: old.vertexColors, side: old.side } );
 			material.colorNode = old.colorNode;
+			material.positionNode = old.positionNode; material.normalNode = old.normalNode;
 			material.name = old.name;
 			material.userData = { ...old.userData };
 			if ( old.userData.cityGround && material.isMeshStandardNodeMaterial ) {
@@ -232,31 +233,27 @@ export class CityWorld {
 
 	setGroundDetail( on ) { this.groundDetail.value = on ? 1 : 0; }
 	setWet( on ) { this.groundWet.value = on ? 1 : 0; }
-	update( dt ) { this.traffic.update( dt ); }
-	setCarCount( count ) {
-
-		const old = this.traffic.mesh.count;
-		this.traffic.setCount( count );
-		this.staticTriangles += ( this.traffic.mesh.count - old ) * this.traffic.mesh.geometry.userData.triangles;
-
-	}
+	update( dt, camera ) { this.traffic.update( dt, camera ); }
+	setCarCount( count ) { this.traffic.setCount( count ); }
+	get staticTriangles() { return this.baseTriangles + this.traffic.triangles; }
 
 	stats( camera ) {
 
 		const frustum = new THREE.Frustum().setFromProjectionMatrix( new THREE.Matrix4().multiplyMatrices( camera.projectionMatrix, camera.matrixWorldInverse ), THREE.WebGPUCoordinateSystem );
-		let triangles = 0, draws = 0;
-		for ( const m of this.meshes ) if ( m.visible && frustum.intersectsObject( m ) ) {
+		let triangles = this.traffic.triangles, draws = this.traffic.draws;
+		for ( const m of this.meshes ) if ( m.visible && ! m.userData.cityCars && frustum.intersectsObject( m ) ) {
 
 			triangles += ( m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count ) / 3 * ( m.isInstancedMesh ? m.count : 1 ); draws ++;
 
 		}
-		return { triangles, draws, totalTriangles: this.staticTriangles, bytes: this.bytes };
+		return { triangles, draws, totalTriangles: this.staticTriangles, bytes: this.bytes + this.traffic.gpu.bytes };
 
 	}
 
 	dispose() {
 
 		this.scene.remove( this.group );
+		this.traffic.dispose();
 		for ( const m of this.meshes ) if ( m.isInstancedMesh ) m.dispose();
 		for ( const g of this.geometries ) g.dispose();
 		for ( const m of this.materials ) m.dispose();

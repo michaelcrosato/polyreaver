@@ -77,7 +77,7 @@ export class World {
 
 	get propTriangles() {
 
-		if ( this.cityView ) return this.cityView.meshes.filter( ( mesh ) => mesh.visible ).reduce( ( sum, mesh ) => sum + ( mesh.geometry.index?.count || mesh.geometry.attributes.position.count ) / 3 * ( mesh.isInstancedMesh ? mesh.count : 1 ), 0 );
+		if ( this.cityView ) return this.cityView.traffic.triangles + this.cityView.meshes.filter( ( mesh ) => mesh.visible && ! mesh.userData.cityCars ).reduce( ( sum, mesh ) => sum + ( mesh.geometry.index?.count || mesh.geometry.attributes.position.count ) / 3 * ( mesh.isInstancedMesh ? mesh.count : 1 ), 0 );
 		if ( ! this.propsOn ) return 0;
 		return ( this.trees ? this.trees.count * this.treeGeo.userData.triangles : 0 ) +
 			( this.lamps ? this.lamps.count * this.lampGeo.userData.triangles : 0 ) +
@@ -291,7 +291,7 @@ export class World {
 			for ( const mesh of this.cityView.meshes ) {
 
 				mesh.receiveShadow = on;
-				mesh.castShadow = on && ( mesh.isInstancedMesh || mesh.name.startsWith( 'City props' ) );
+				mesh.castShadow = on && ( mesh.isInstancedMesh || mesh.userData.cityCars || mesh.name.startsWith( 'City props' ) );
 
 			}
 			return;
@@ -367,7 +367,7 @@ export class World {
 	// --- per frame -----------------------------------------------------------
 	update( dt, focus, camera, viewExtent ) {
 
-		this.cityView?.update( dt );
+		this.cityView?.update( dt, camera );
 		updateSun( this, focus, viewExtent );
 
 		const u = this.u;

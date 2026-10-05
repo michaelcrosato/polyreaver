@@ -9,6 +9,7 @@ import { DPR } from './config.js';
 export function buildReport( app ) {
 
 	const g = app.gpu, s = app.stats, S = app.S;
+	const traffic = app.world.cityView?.traffic;
 	const base = defaults();
 	const changed = Object.entries( S ).filter( ( [ k, v ] ) => base[ k ] !== v ).map( ( [ k, v ] ) => `  ${findItem( k )?.label || k}: ${v}` );
 	const lines = [
@@ -25,6 +26,7 @@ export function buildReport( app ) {
 		`Now: ${s.fps.toFixed( 1 )} fps · frame ${s.frameMs.toFixed( 2 )} ms · CPU ${s.cpuMs.toFixed( 2 )} ms` + ( g.timestamps ? ` · GPU ${( s.gpuRender + s.gpuCompute ).toFixed( 2 )} ms` : '' ),
 		`Play-session spikes: worst frame ${s.worstFrameMs.toFixed( 2 )} ms · worst CPU ${s.worstCpuMs.toFixed( 2 )} ms · ${s.framesOver50} frames over 50 ms (loading excluded)`,
 		`Agents: ${S.count} · model ${app.crowd.models[ S.tier ].id} (${app.crowd.models[ S.tier ].triangles} tris) · path ${S.path}`,
+		...( traffic ? [ `Cars: ${traffic.count} · ${traffic.gpu.count ? `GPU traffic · visible ${traffic.gpu.visibleCounts.reduce( ( total, n ) => total + n, 0 )} · buffers ${( traffic.gpu.bytes / 1048576 ).toFixed( 1 )} MB` : 'CPU traffic'}` ] : [] ),
 		`Triangles/frame (all passes): ${formatCount( app._tris || 0 )}`,
 		...( app.renderPreparation ? [ `Scene preparation: ${app.renderPreparation.objects} objects · ${app.renderPreparation.ms.toFixed( 0 )} ms before play` ] : [] ),
 		'',
@@ -104,12 +106,15 @@ export function updateHud( app ) {
 	}
 
 	const animBytes = cs.animBytes ? ` · ${( cs.animBytes / 1048576 ).toFixed( cs.animBytes > 1048576 ? 0 : 2 )} MB` : '';
+	const traffic = app.world.cityView?.traffic;
+	const cars = traffic ? `<div>cars <b>${traffic.count.toLocaleString()}</b>${traffic.gpu.count ? ` · visible <b>${traffic.gpu.visibleCounts.reduce( ( total, n ) => total + n, 0 ).toLocaleString()}</b>` : ''}</div>` : '';
 	const animLine = `<div class="x">animation <b>${S.anim}</b>${animBytes}${S.anim === 'skeletal' && app.crowd.animSystem !== 'skeletal' ? ' (unsupported here, using keyframe)' : ''}${app.crowd.skeletalLimit < S.count ? ` · bones for first ${formatCount( app.crowd.skeletalLimit )}` : ''}</div>`;
 	app.ui.setHud(
 		`<div class="fps ${fpsClass}">${s.fps.toFixed( 0 )}<small> fps</small></div>` +
 		`<div>frame <b>${s.frameMs.toFixed( 1 )}</b> ms · CPU <b>${s.cpuMs.toFixed( 2 )}</b> ms</div>` +
 		`<div>${gpuLine}</div>` +
 		`<div>agents <b>${formatCount( S.count )}</b>${vis}</div>` +
+		cars +
 		`<div>triangles/frame <b>${formatCount( Math.round( tris ) )}</b> <span class="dim">(crowd ${formatCount( cs.tris + castTris )})</span></div>` +
 		`<div class="x">draw calls <b>${info.render.drawCalls}</b> · passes ${app.post.active ? app.post.passes : 1}${shadowsOn ? ' + shadow' : ''}</div>` +
 		`<div class="dim x">${w}×${hgt} px (${app.pixelRatio.toFixed( 2 )}x)</div>` +

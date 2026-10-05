@@ -16,6 +16,7 @@
     "sim": "node scripts/sim.mjs",
     "smoke:game": "node scripts/game-smoke.mjs",
     "test:city": "node --test scripts/city-validate.mjs",
+    "test:cars": "node scripts/car-smoke.mjs",
     "build:city": "node scripts/build.mjs",
     "smoke:city": "node scripts/city-options-smoke.mjs",
     "bench:city": "node scripts/city-benchmark.mjs",

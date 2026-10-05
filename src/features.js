@@ -12,6 +12,7 @@
 export const COUNT_STEPS = [ 100, 500, 1000, 2000, 5000, 10000, 20000, 35000, 50000, 75000, 100000, 150000, 200000, 300000, 500000, 750000, 1000000, 1500000, 2000000, 3000000, 4000000 ];
 
 export const CAPACITIES = [ 65536, 262144, 1048576, 2097152, 4194304 ];
+export const CAR_COUNTS = [ 0, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288 ];
 
 const fmt = ( n ) => n >= 1e6 ? ( n / 1e6 ).toFixed( n % 1e6 ? 1 : 0 ) + 'M' : n >= 1000 ? Math.round( n / 1000 ) + 'k' : String( n );
 export { fmt as formatCount };
@@ -21,7 +22,7 @@ export const SECTIONS = [
 		id: 'scene', title: 'Scene', items: [
 			{ key: 'scene', label: 'Scene', type: 'select', def: 'city', cost: 2, bound: 'vertex / compute', options: [ [ 'city', 'Procedural city' ], [ 'plaza', 'Original plaza' ] ], info: 'One stress test, two environments. Both use every crowd, graphics, animation, physics and benchmark control below. The city adds seeded buildings, streets, parks and bridges; agents wander on its walkable surface.' },
 			{ key: 'seed', label: 'City seed', type: 'text', def: 'harbor-100k', cost: 0, bound: 'cpu', info: 'The same seed generates the same 2 km city. Editing it regenerates the city while preserving engine settings.' },
-			{ key: 'carCount', label: 'Cars (city roads)', type: 'select', def: 128, cost: 1, bound: 'cpu / vertex', options: [ [ 0, 'Off' ], [ 64, '64' ], [ 128, '128' ], [ 256, '256' ], [ 512, '512' ] ], info: 'Low-poly traffic follows street lanes, curves through junctions and uses the existing bridges. Cars wait at traffic lights and leave a gap to the car ahead. City only; independent of pedestrian count and physics.' },
+			{ key: 'carCount', label: 'Cars (city roads)', type: 'select', def: 128, cost: 2, bound: 'compute / vertex', options: CAR_COUNTS.map( ( n ) => [ n, n === 0 ? 'Off' : n >= 1024 ? `${n / 1024}K` : String( n ) ] ), info: 'Up to 512K (524,288) road-constrained cars. Small fleets use CPU traffic with following gaps; larger fleets use GPU road traversal, frustum culling and distant models. All cars stay in street lanes and use curved junction paths and existing bridges. At stress-test densities cars may overlap. City only; independent of pedestrian count and physics.' },
 			{ type: 'actions', actions: [ [ 'regenerateCity', 'Regenerate city' ], [ 'cityOverview', 'City overview' ] ] }
 		]
 	},
