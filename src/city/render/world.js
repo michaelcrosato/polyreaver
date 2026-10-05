@@ -5,6 +5,7 @@ import { attribute, normalLocal, positionWorld, uv, vec3, float, texture, mix, f
 import { World } from '../../world.js';
 import { makeMaterial } from '../../world/materials.js';
 import { boxGeometry, pyramidGeometry, mergedGeometry } from './geometry.js';
+import { CityTraffic } from '../traffic.js';
 
 const PALETTES = {
 	residential: [ 0xc7b69b, 0xb5a385, 0xd2c6b0, 0xa79888 ], apartments: [ 0xb6b9ad, 0xc3b69b, 0xa8b6bc, 0xcec4aa ],
@@ -140,6 +141,12 @@ export class CityWorld {
 		this.resetPropMatrices();
 		this.trees.computeBoundingSphere(); this.lamps.computeBoundingSphere();
 		this.addMarkings();
+		this.traffic = new CityTraffic( city );
+		for ( const mesh of [ this.traffic.mesh, this.traffic.signalMesh ] ) {
+
+			this.materials.add( mesh.material ); this.add( mesh );
+
+		}
 		this.staticTriangles = this.meshes.reduce( ( sum, m ) => sum + ( m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count ) / 3 * ( m.isInstancedMesh ? m.count : 1 ), 0 );
 		this.bytes = city.surface.data.byteLength + this.meshes.reduce( ( n, m ) => n + Object.values( m.geometry.attributes ).reduce( ( sum, a ) => sum + a.array.byteLength, 0 ) + ( m.instanceMatrix?.array.byteLength || 0 ) + ( m.instanceColor?.array.byteLength || 0 ), 0 );
 
@@ -225,6 +232,14 @@ export class CityWorld {
 
 	setGroundDetail( on ) { this.groundDetail.value = on ? 1 : 0; }
 	setWet( on ) { this.groundWet.value = on ? 1 : 0; }
+	update( dt ) { this.traffic.update( dt ); }
+	setCarCount( count ) {
+
+		const old = this.traffic.mesh.count;
+		this.traffic.setCount( count );
+		this.staticTriangles += ( this.traffic.mesh.count - old ) * this.traffic.mesh.geometry.userData.triangles;
+
+	}
 
 	stats( camera ) {
 

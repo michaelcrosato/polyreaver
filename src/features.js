@@ -21,6 +21,7 @@ export const SECTIONS = [
 		id: 'scene', title: 'Scene', items: [
 			{ key: 'scene', label: 'Scene', type: 'select', def: 'city', cost: 2, bound: 'vertex / compute', options: [ [ 'city', 'Procedural city' ], [ 'plaza', 'Original plaza' ] ], info: 'One stress test, two environments. Both use every crowd, graphics, animation, physics and benchmark control below. The city adds seeded buildings, streets, parks and bridges; agents wander on its walkable surface.' },
 			{ key: 'seed', label: 'City seed', type: 'text', def: 'harbor-100k', cost: 0, bound: 'cpu', info: 'The same seed generates the same 2 km city. Editing it regenerates the city while preserving engine settings.' },
+			{ key: 'carCount', label: 'Cars (city roads)', type: 'select', def: 128, cost: 1, bound: 'cpu / vertex', options: [ [ 0, 'Off' ], [ 64, '64' ], [ 128, '128' ], [ 256, '256' ], [ 512, '512' ] ], info: 'Low-poly traffic follows street lanes, curves through junctions and uses the existing bridges. Cars wait at traffic lights and leave a gap to the car ahead. City only; independent of pedestrian count and physics.' },
 			{ type: 'actions', actions: [ [ 'regenerateCity', 'Regenerate city' ], [ 'cityOverview', 'City overview' ] ] }
 		]
 	},

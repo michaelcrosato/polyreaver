@@ -14,7 +14,7 @@ export const DPR = window.devicePixelRatio || 1;
 
 export const CROWD_KEYS = new Set( [ 'count', 'capacity', 'tier', 'path', 'lod', 'anim', 'animBlend', 'behaviour', 'density', 'activity', 'speed', 'outlines', 'outlineWidth', 'rim', 'blobShadows', 'crowdShadows', 'motionVectors' ] );
 export const SHADING_KEYS = new Set( [ 'shading', 'hemi', 'env', 'shadows', 'pointLights', 'clustered' ] );
-export const WORLD_KEYS = new Set( [ 'sky', 'fog', 'props', 'groundDetail' ] );
+export const WORLD_KEYS = new Set( [ 'sky', 'fog', 'props', 'groundDetail', 'carCount' ] );
 export const RES_KEYS = new Set( [ 'maxDpr', 'renderScale', 'upscaler' ] );
 export const POST_KEYS = new Set( [ 'aa', 'toneMapping', 'exposure', 'ao', 'bloom', 'dof', 'motionBlur', 'ssr', 'ssgi', 'grading', 'vignette', 'grain', 'chromatic', 'sharpen', 'stylize' ] );
 export const PHYS_KEYS = new Set( [ 'physics', 'crowdMode', 'rapierAgents', 'agentRadius', 'proxies', 'proxyCount', 'knockdown', 'physProps', 'propsDynamic', 'bodies', 'shape', 'sizeVar', 'spawn', 'restitution', 'friction', 'gravity', 'hz', 'iterations', 'ccd', 'sleep', 'recycle', 'physDebug' ] );

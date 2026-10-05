@@ -243,7 +243,7 @@ class App {
 		const preset = PRESETS[ id ].values;
 		const values = { ...defaults(), ...preset };
 		// keep crowd size / camera / physics choices unless the preset sets them
-		for ( const k of [ 'scene', 'seed', 'count', 'capacity', 'camera', 'physics', 'bodies', 'shape', 'behaviour', 'density', 'crowdMode' ] ) if ( ! ( k in preset ) ) values[ k ] = this.S[ k ];
+		for ( const k of [ 'scene', 'seed', 'carCount', 'count', 'capacity', 'camera', 'physics', 'bodies', 'shape', 'behaviour', 'density', 'crowdMode' ] ) if ( ! ( k in preset ) ) values[ k ] = this.S[ k ];
 		return this.applyAll( values );
 
 	}
