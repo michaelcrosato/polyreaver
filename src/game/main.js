@@ -24,8 +24,7 @@ import { RenderContext } from './render/context.js';
 import { UI } from './ui/shell.js';
 import { installInput } from './input.js';
 import { all, get } from './core/registry.js';
-
-const SAVE_KEY = 'polyreaver.save.v1';
+import { SaveManager } from './features/progression/persistence.js';
 
 function readHash() {
 
@@ -42,29 +41,9 @@ function readHash() {
 
 }
 
-export function loadSave() {
-
-	try {
-
-		const s = JSON.parse( localStorage.getItem( SAVE_KEY ) || 'null' );
-		return s && s.version === 1 ? s : null;
-
-	} catch {
-
-		return null;
-
-	}
-
-}
-
 export function writeSave( game ) {
 
-	try {
-
-		game.save.savedAt = Date.now();
-		localStorage.setItem( SAVE_KEY, JSON.stringify( game.save ) );
-
-	} catch { /* private mode / quota: the run still works, it just is not kept */ }
+	return game.saves?.save( game.save );
 
 }
 
@@ -72,6 +51,9 @@ export async function initialize( { gpu, boot } ) {
 
 	mountLayout( layout );
 	const opts = readHash();
+	const saves = new SaveManager();
+	boot.stop = () => saves.dispose();
+	const saved = await saves.load( { fresh: !! opts.fresh } );
 
 	const renderer = new THREE.WebGPURenderer( { device: gpu.device, antialias: true, trackTimestamp: gpu.timestamps } );
 	renderer.setPixelRatio( Math.min( devicePixelRatio, opts.dpr ? + opts.dpr : 2 ) );
@@ -81,17 +63,40 @@ export async function initialize( { gpu, boot } ) {
 	renderer.toneMappingExposure = 1.05;
 	document.getElementById( 'game' ).append( renderer.domElement );
 	await boot.step( 'REN', 'Initializing game renderer', 55, () => renderer.init() );
-	boot.stop = () => renderer.setAnimationLoop( null );
+	boot.stop = () => { renderer.setAnimationLoop( null ); saves.dispose(); };
 	renderer.onDeviceLost = ( info ) => boot.fail( new Error( info.message ), 'GPU-LOST' );
 
-	const saved = opts.fresh ? null : loadSave();
 	const game = new Game( { seed: opts.seed || 'polyreaver', save: saved } );
 	if ( saved ) game.upgradeSave( game.save );
+	game.saves = saves;
 	const rc = new RenderContext( renderer, gpu );
 	rc.init( game );
 	const ui = new UI( game, document.getElementById( 'ui' ) );
 	ui.init();
 	game.ui = ui; game.rc = rc;
+	game.replaceCharacter = ( save ) => {
+
+		game.save = save;
+		rc.input?.releaseAll();
+		game.input.held.clear(); game.input.pressed.clear();
+		game.input.move.x = game.input.move.z = 0;
+		game.enterTown();
+		game.events.emit( 'inventory', { save } );
+
+	};
+	const saveCurrent = () => boot.state.status === 'running' && writeSave( game );
+	let saveTimer;
+	let lastSaveNotice = '';
+	saves.onStatus( ( status ) => {
+
+		if ( [ 'error', 'conflict', 'unavailable' ].includes( status.code ) && status.message !== lastSaveNotice ) {
+
+			lastSaveNotice = status.message;
+			ui.toast( status.message, 'error' );
+
+		}
+
+	} );
 	// the combat feature can replace the baseline input with define( 'inputProvider', { id: 'default', install } )
 	const install = get( 'inputProvider', 'default' )?.install ?? installInput;
 	const poll = install( game, rc, renderer.domElement, ( a ) => ui.action( a ) );
@@ -99,7 +104,7 @@ export async function initialize( { gpu, boot } ) {
 	game.events.on( 'world', ( { world } ) => {
 
 		rc.setWorld( world );
-		writeSave( game );
+		saveCurrent();
 
 	} );
 	game.events.on( 'levelup', ( { level } ) => ui.toast( `Level ${level}!`, 'levelup' ) );
@@ -109,8 +114,15 @@ export async function initialize( { gpu, boot } ) {
 		setTimeout( () => game.enterTown(), 2500 );
 
 	} );
-	setInterval( () => writeSave( game ), 15000 );
-	addEventListener( 'beforeunload', () => writeSave( game ) );
+	const flushSave = () => {
+
+		if ( boot.state.status === 'running' && saves.writer && saves.mode === 'active' ) saves.write( game.save );
+
+	};
+	addEventListener( 'beforeunload', flushSave );
+	addEventListener( 'pagehide', () => { flushSave(); saves.release(); } );
+	addEventListener( 'pageshow', ( event ) => event.persisted && saveCurrent() );
+	document.addEventListener( 'visibilitychange', () => document.hidden && saveCurrent() );
 	addEventListener( 'resize', () => rc.resize() );
 
 	// features that need the live game (agent API, debug hooks, labs) register 'boot' hooks
@@ -177,6 +189,13 @@ export async function initialize( { gpu, boot } ) {
 
 	};
 
-	return { frame, start: () => renderer.setAnimationLoop( frame ), stop: () => renderer.setAnimationLoop( null ) };
+	return { frame, start: () => {
+
+		renderer.setAnimationLoop( frame );
+		saveTimer = setInterval( saveCurrent, 15000 );
+		// BootLoader reveals the running state immediately after start() returns.
+		queueMicrotask( saveCurrent );
+
+	}, stop: () => { renderer.setAnimationLoop( null ); clearInterval( saveTimer ); saves.dispose(); } };
 
 }

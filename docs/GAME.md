@@ -99,7 +99,7 @@ override baseline). Kinds:
 ## 3. Simulation kernel (core/)
 
 * **Fixed step** 60 Hz (`SIM_HZ`); render interpolates (`rc.lerp(e)` uses `e.px/pz/py/pf`).
-* **World system order**: 10–15 input/controllers · 20 AI · 30 actions · 40 skills · 50 movement ·
+* **World system order**: 10–15 input/controllers · 20 AI · 30 actions · 40 skills · 50 movement · 59 spatial refresh ·
   60 projectiles/areas · 70 statuses · 80 regen · 85 mechanics · 90 director · 95 loot/pickup · 100 cleanup.
 * **Entity** (`core/entity.js`): `kind` (`player|monster|boss|npc|prop|loot`), `team` (`TEAM.PLAYER/ENEMY/NEUTRAL`),
   `x z y`, `vx vz vy`, `facing` (rad, 0 = +z, π/2 = +x), `radius height mass solid`, `moveIntent {x,z}` (0..1),
@@ -116,9 +116,13 @@ override baseline). Kinds:
 * **Delivery** (`core/effects.js`): `world.melee(owner, { range, angle, hit, fx, element })`,
   `world.projectile(owner, { dir|tx,tz, speed, range, radius, pierce, chain, homing, returns, hit, fx, color, element, onHit, onEnd })`,
   `world.area(owner, { x, z, radius, shape: circle|ring|cone|line, delay (telegraph), duration, interval, hit, hitOnce, follow, fx, element, onTick, onHit, friendly })`.
+  Projectiles test swept circle contacts in travel order, clipped to walls and remaining range; a return leg also
+  clips to the owner's catch radius. Spatial buckets recycle arrays and support allocation-free `forEach`/`nearest`;
+  movement updates cell membership and the order-59 refresh includes post-movement teleports and newly spawned bodies.
 * **Hit template** (`core/combat.js`): `{ damage: { physical:[min,max], fire, cold, lightning, chaos }, tags, effectiveness,
   addFlat, critChance, knockback, stun, ailments: { ignite: 25 … }, skill, noAilments, noLeech, canBlock, canEvade, onHit }`.
-  `world.dealDamage(src, tgt, hit)` → `{ total, byType, crit, killed }`. Sliders apply here.
+  `world.dealDamage(src, tgt, hit)` → `{ total, byType, crit, killed, lifeDamage, manaDamage, shieldDamage }`.
+  Shield and mana protection route damage before death detection and callbacks; `total` remains the full mitigated hit.
 * **Statuses**: `world.applyStatus(e, id, { source, duration, stacks, …data })`, `world.removeStatus(e, id)`.
   Ailment ids used by combat.js: `ignite chill freeze shock poison bleed` (+ `stun`).
 * **Kill**: `world.kill(e, killer, hit)` emits `death`; corpses stay `data.corpseTime` (default 4 s) for death animations.
@@ -129,23 +133,33 @@ damage (multiplier, base 1) added_<type>_min added_<type>_max crit_chance crit_m
 projectile_count projectile_speed pierce chain duration cooldown_recovery mana_cost armor evade_chance
 block_chance res_<type> max_res_<type> pen_<type> pen_armor damage_taken life_leech mana_leech life_on_hit
 <ailment>_chance knockback stun_threshold pickup_radius item_rarity item_quantity gold_find xp_gain
-dodge_cooldown dodge_distance strength dexterity intelligence minion_damage minion_life`.
+dodge_cooldown dodge_distance strength dexterity intelligence minion_damage minion_life
+chaos_immune damage_to_mana skill_cost_life skill_cost_shield_first`.
 `damage_taken` has a base of 1 on players and monsters (so "increased damage taken" mods work).
+`chaos_immune` protects hits and chaos damage over time. `damage_to_mana` is a percentage of hit damage left after
+shield absorption (clamped to 100%); DOT does not use it. `skill_cost_life` gives Blood Magic priority over
+`skill_cost_shield_first` (Eldritch Battery). `skillCost(entity, amount, tags)` returns the exact life/mana/shield
+split and affordability; spending is immediate and atomic when a paid skill starts.
 `<type>` ∈ `physical fire cold lightning chaos`. Mod: `{ stat, type: flat|inc|more|override, value, tags?, when? }`.
 
 ### Events (`world.events`, payload fields)
-`spawn {entity}` · `despawn` · `hit {source,target,total,byType,crit,killed,x,z,skill,tags}` · `evade` · `block` ·
+`spawn {entity}` · `despawn` · `hit {source,target,total,byType,crit,killed,lifeDamage,manaDamage,shieldDamage,x,z,skill,tags}` · `evade` · `block` ·
 `death {entity,killer,hit,x,z}` · `action {entity,action,duration}` · `melee {owner,x,z,dir,range,angle,hits,fx,element}` ·
 `projectile {p}` · `projectile:end {p,reason}` · `area {a}` · `area:tick` · `area:end` · `status {entity,id,stacks}` ·
 `dodge {entity}` · `shake {amount}` · `hitstop {time}` · `sfx {id,x,z,volume}` · `loot {item,x,z}` · `pickup {item}` ·
 `interact {entity,target}` · `mechanic {id,…}` · `bossPhase {boss,phase}` · `objective {text}` · `exitOpen {x,z}`.
 Game-level (`game.events`): `world`, `levelup`, `gold`, `levelComplete`, `playerDeath`, `tuning`.
+`manaSpent {entity,amount,skill}` is a world event for actual mana debited by a successful skill. Refunds, potions,
+mana damage and life/shield costs do not create this event; hooks must not infer spending from net resource changes.
 
 ### Input state (`game.input`, also written by bots and the agent API)
 `move {x,z}` (length ≤ 1, world-space; screen-up = −z), `aim {x,z}` (world point), `held` / `pressed` Sets of
 action names: `attack skill1…skill5` (the six bar slots), `dodge interact potion flask2 flask3 flask4`. `pressed` lasts
 one sim step. Default keys: LMB, RMB, 1–4, Space, F/E, Q (best flask), R/Z/X (flask slots 2–4); gamepad and touch twin-stick
 in `features/combat/client/input.js`.
+The Controls panel owns device-local bindings (`polyreaver.controls.v1`). Input owns physical sources separately,
+so releasing a key, pointer or controller only releases its actions; blur/visibility/disconnect clear its state.
+Labels use `controlLabel()` and follow the current device. Bots retain the same shared input contract.
 
 ### World state (`world.state`)
 Plain per-world data, **namespaced by feature**: `flow` (world: level flow, exit, timer), `mech` (world: mechanic
@@ -214,6 +228,17 @@ slots `weapon offhand helm chest gloves boots belt amulet ring1 ring2`, stash, v
 currencies. Player stats come from `statSource` defs (level, attributes, gear, tree). Equipment changes update
 `player.model.weapon/gear` for the renderer and call `game.applyPlayerStats()`.
 
+Browser persistence lives in `features/progression/persistence.js`: `SaveManager` loads/migrates a character,
+claims an exclusive Web Lock, compares stored revisions before writing, and retains separate autosave and
+replacement-undo snapshots. Original malformed/unsupported bytes remain available for recovery. Item UIDs
+are unique across reloads without consuming extra loot RNG, and migration repairs existing duplicates.
+The **Character saves** panel exposes validated JSON import/export and explicit replacement previews.
+
+`planner.js` is simulation-only and exposes `planner.create` and `planner.preview` commands. Drafts contain a
+future level, tree/ascendancy, equipment snapshots and skill/support loadouts; evaluation rebuilds stat sources
+on isolated copies and reports point budgets, acquisition/attribute requirements and stat/DPS deltas. `PRB1:`
+codes are versioned, size-limited and validated. Client drafts persist separately as `polyreaver.buildDraft.v1`.
+
 ## 8. Levels (world feature) — one mechanic per level, named after it
 
 Designed campaign (depth → name, mechanic, theme). Casual players can ignore each mechanic and just fight; experts
@@ -261,7 +286,7 @@ head look-at, idle variety); ambient townsfolk can use the GPU crowd.
 ## 10. Agent tools (tools feature)
 
 `game.api( id, args )` runs a registered `apiCommand` and returns plain JSON — the same commands are exposed to Node
-(`scripts/sim.mjs`), to the browser console (`window.api`, the ` inspector) and to the Claude link. `help` lists all 58.
+(`scripts/sim.mjs`), to the browser console (`window.api`, the ` inspector) and to the Claude link. `help` lists registered commands.
 Groups: world & entities (`describe entities inspect stat events step teleport kill.all spawn`), levels (`town level.enter
 level.spec level.ascii level.describe level.campaign mechanic.list mechanic.describe theme.list world.state`), monsters
 (`monsters.*`), loot & character (`loot.roll loot.sim items.* tree.* stats.player flask.drink player.set player.kit`), combat

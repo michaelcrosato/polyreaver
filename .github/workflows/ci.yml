@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,10 +19,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - run: npm run test:regression
       - run: npm run test:city
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:boot
+      - run: npm run test:features
+      - run: npm run test:render
       - run: npm run smoke:city-options -- --quick
       - name: Check the committed single-file builds are current
         run: |

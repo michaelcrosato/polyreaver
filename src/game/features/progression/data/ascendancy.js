@@ -100,17 +100,7 @@ A( 'stormweaver', 'Stormweaver', 'sorcery', '#6090f0', 'A master of the elements
 			}
 		} } ],
 	[ S( 'Mana', M( 'mana', 'inc', 8 ) ), { name: 'Mana Shield', lines: [ '35% of Damage taken from Hits is taken from Mana before Life' ],
-		hooks: {
-			struck( ctx, ev ) {
-
-				const p = ctx.player;
-				if ( ! p.alive ) return;
-				const moved = Math.min( ev.total * 0.35, p.mana );
-				p.mana -= moved;
-				p.life = Math.min( p.maxLife, p.life + moved );
-
-			}
-		} } ],
+		mods: [ M( 'damage_to_mana', 'flat', 35 ) ] } ],
 	[ S( 'Elemental Damage', M( 'damage', 'inc', 8, [ 'fire' ] ), M( 'damage', 'inc', 8, [ 'cold' ] ), M( 'damage', 'inc', 8, [ 'lightning' ] ) ), { name: 'Elemental Mastery', mods: [ M( 'skill_level', 'flat', 1, [ 'fire' ] ), M( 'skill_level', 'flat', 1, [ 'cold' ] ), M( 'skill_level', 'flat', 1, [ 'lightning' ] ), M( 'pen_fire', 'flat', 10 ), M( 'pen_cold', 'flat', 10 ), M( 'pen_lightning', 'flat', 10 ) ] } ],
 	[ S( 'Lightning Damage', M( 'damage', 'inc', 12, [ 'lightning' ] ) ), { name: 'Storm Herald', lines: [ 'Every 2.5 seconds, Lightning strikes a nearby enemy for heavy damage' ],
 		hooks: {

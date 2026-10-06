@@ -28,11 +28,10 @@ function K( def ) {
 // --- Might (STR) -------------------------------------------------------------------------------
 K( { id: 'blood-magic', name: 'Blood Magic', region: 'might', icon: 'drop',
 	lines: [ 'Skills cost Life instead of Mana', 'Your Mana is always kept full', '10% increased maximum Life' ],
-	mods: [ M( 'life', 'inc', 10 ) ],
+	mods: [ M( 'life', 'inc', 10 ), M( 'skill_cost_life', 'override', 1 ) ],
 	hooks: {
-		manaSpent( ctx, amount ) {
+		tick( ctx ) {
 
-			ctx.player.life = Math.max( 1, ctx.player.life - amount );
 			ctx.player.mana = ctx.player.maxMana;
 
 		}
@@ -126,39 +125,18 @@ K( { id: 'conflagration', name: 'Conflagration', region: 'ms', icon: 'flame',
 // --- Sorcery (INT) ---------------------------------------------------------------------------------
 K( { id: 'eldritch-battery', name: 'Eldritch Battery', region: 'sorcery', icon: 'battery',
 	lines: [ 'Skill costs are paid from Energy Shield before Mana', 'Gain maximum Energy Shield equal to 50% of maximum Mana', '50% less Mana Regeneration' ],
-	mods: [ M( 'mana_regen', 'more', - 50 ) ],
+	mods: [ M( 'mana_regen', 'more', - 50 ), M( 'skill_cost_shield_first', 'override', 1 ) ],
 	derive( T ) {
 
 		return [ M( 'shield', 'flat', Math.round( T.get( 'mana' ) * 0.5 ) ) ];
 
-	},
-	hooks: {
-		manaSpent( ctx, amount ) {
-
-			const p = ctx.player;
-			const paid = Math.min( p.shield, amount );
-			p.shield -= paid;
-			p.mana = Math.min( p.maxMana, p.mana + paid );
-
-		}
 	} } );
 K( { id: 'chaos-inoculation', name: 'Chaos Inoculation', region: 'sorcery', icon: 'void',
 	lines: [ 'Maximum Life is 1', 'Immune to Chaos Damage', '40% more maximum Energy Shield' ],
-	mods: [ M( 'life', 'override', 1 ), M( 'res_chaos', 'override', 100 ), M( 'max_res_chaos', 'flat', 25 ), M( 'shield', 'more', 40 ) ] } );
+	mods: [ M( 'life', 'override', 1 ), M( 'res_chaos', 'override', 100 ), M( 'max_res_chaos', 'flat', 25 ), M( 'shield', 'more', 40 ), M( 'chaos_immune', 'override', 1 ) ] } );
 K( { id: 'mind-over-matter', name: 'Mind over Matter', region: 'sorcery', icon: 'mind',
 	lines: [ '30% of Damage taken from Hits is taken from Mana before Life', '15% increased maximum Mana' ],
-	mods: [ M( 'mana', 'inc', 15 ) ],
-	hooks: {
-		struck( ctx, ev ) {
-
-			const p = ctx.player;
-			if ( ! p.alive ) return;
-			const moved = Math.min( ev.total * 0.3, p.mana );
-			p.mana -= moved;
-			p.life = Math.min( p.maxLife, p.life + moved );
-
-		}
-	} } );
+	mods: [ M( 'mana', 'inc', 15 ), M( 'damage_to_mana', 'flat', 30 ) ] } );
 K( { id: 'zealots-oath', name: "Zealot's Oath", region: 'sorcery', icon: 'halo',
 	lines: [ 'Life Regeneration applies to Energy Shield instead of Life' ],
 	hooks: {

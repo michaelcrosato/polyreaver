@@ -10,6 +10,7 @@ import { carCount } from '../city/traffic-sim.js';
 export function applyCrowd( app ) {
 
 	const S = app.S, crowd = app.crowd;
+	const previousGeneration = crowd.storageGeneration;
 	// GPU-driven culling and GPU collisions bind up to 8 storage buffers per shader.
 	if ( app.storageLimit < 8 && S.path === 'gpu' ) {
 
@@ -19,8 +20,12 @@ export function applyCrowd( app ) {
 
 	}
 
+	// Apply the intended collision mode before allocating: enabling collisions may
+	// lower the capacity limit, while disabling them allows larger instance buffers.
+	crowd.set( { collide: S.physics && S.crowdMode !== 'off' && app.storageLimit >= 8 } );
 	const cap = app.resolveCapacity();
 	if ( cap !== crowd.capacity ) crowd.setCapacity( cap );
+	if ( S.capacity !== 'auto' && Number( S.capacity ) > cap ) S.capacity = cap;
 	const u = crowd.u;
 	// The city's finite-map compression depends on count and density, so reset
 	// initial positions when the packing changes. All other controls keep state.
@@ -38,7 +43,16 @@ export function applyCrowd( app ) {
 	} );
 	u.outline.value = S.outlineWidth;
 	crowd.setCount( S.count );
+	S.count = crowd.count;
+	app.ui.controls.get( 'count' )?.set( S.count );
+	app.ui.controls.get( 'capacity' )?.set( S.capacity );
 	app.world.setRadius( crowd.radius );
+	if ( app.physics.enabled && app.physics.p.crowdMode === 'rapier' && crowd.collide &&
+		( previousGeneration !== crowd.storageGeneration || app.physics.agentBodies.length !== Math.min( app.physics.p.rapierAgents, crowd.count - 1 ) ) ) {
+
+		app.physics._applyCrowdMode( true );
+
+	}
 
 }
 

@@ -4,6 +4,7 @@ import * as THREE from 'three/webgpu';
 import layout from './boot/layouts/stress.html?raw';
 import { mountLayout } from './boot/layout.js';
 import { Crowd } from './crowd/crowd.js';
+import { crowdCapacityLimit } from './crowd/limits.js';
 import { World } from './world.js';
 import { CameraRig } from './camera.js';
 import { Input } from './input.js';
@@ -120,11 +121,11 @@ class App {
 
 	}
 
-	// Largest crowd buffer this GPU allows (one vec4 per agent in one storage binding).
+	// The collision grid can be larger than the render buffers. Keep its limit
+	// conditional so switching physics off still permits the larger stress crowds.
 	get hardMaxCapacity() {
 
-		const maxBinding = this.gpu.limits.maxStorageBufferBindingSize || 134217728;
-		return Math.min( 4194304, Math.floor( maxBinding / 16 ) );
+		return crowdCapacityLimit( this.gpu.limits, { collide: this.S.physics && this.S.crowdMode !== 'off' && this.storageLimit >= 8 } );
 
 	}
 
@@ -165,7 +166,12 @@ class App {
 			this._applyPost();
 
 		} else if ( POST_KEYS.has( key ) ) this._applyPost();
-		else if ( PHYS_KEYS.has( key ) ) this._applyPhysics();
+		else if ( PHYS_KEYS.has( key ) ) {
+
+			this._applyCrowd();
+			this._applyPhysics();
+
+		}
 
 		const c = this.ui.controls.get( key );
 		if ( c ) c.set( this.S[ key ] );

@@ -113,7 +113,11 @@ export function resolveHit( world, src, tgt, hit ) {
 	for ( const type in byType ) {
 
 		let d = byType[ type ];
-		if ( type === 'physical' ) {
+		if ( type === 'chaos' && T.get( 'chaos_immune' ) > 0 ) {
+
+			d = 0;
+
+		} else if ( type === 'physical' ) {
 
 			const armor = Math.max( 0, T.get( 'armor' ) - ( S ? S.get( 'pen_armor', tags ) : 0 ) );
 			d *= 1 - Math.min( 0.9, armor / ( armor + 5 * d + 1e-6 ) );
@@ -140,14 +144,21 @@ export function resolveHit( world, src, tgt, hit ) {
 
 	// --- apply -----------------------------------------------------------------
 	let toLife = total;
+	let shieldDamage = 0;
 	if ( tgt.shield > 0 ) {
 
-		const absorbed = Math.min( tgt.shield, total - ( byType.chaos || 0 ) );
-		tgt.shield -= absorbed;
-		toLife -= absorbed;
+		shieldDamage = Math.min( tgt.shield, Math.max( 0, total - ( byType.chaos || 0 ) ) );
+		tgt.shield -= shieldDamage;
+		toLife -= shieldDamage;
 
 	}
 
+	// Mana protection routes only the part that would reach life, before death and
+	// hit callbacks. Damage-over-time deliveries do not count as hits for this rule.
+	const manaFraction = tags.includes( 'dot' ) ? 0 : Math.max( 0, Math.min( 1, T.get( 'damage_to_mana', tags ) / 100 ) );
+	const manaDamage = Math.min( Math.max( 0, tgt.mana ), toLife * manaFraction );
+	tgt.mana -= manaDamage;
+	toLife -= manaDamage;
 	tgt.life -= toLife;
 	tgt.data.lastHitBy = src?.id;
 	tgt.data.lastHitTime = world.time;
@@ -188,7 +199,8 @@ export function resolveHit( world, src, tgt, hit ) {
 	}
 
 	const killed = tgt.life <= 0;
-	const result = { source: src, target: tgt, total, byType, crit, killed, x: tgt.x, z: tgt.z, skill: hit.skill, tags };
+	const result = { source: src, target: tgt, total, byType, crit, killed, lifeDamage: toLife, manaDamage, shieldDamage,
+		x: tgt.x, z: tgt.z, skill: hit.skill, tags };
 	world.events.emit( 'hit', result );
 	hit.onHit?.( world, src, tgt, result );
 	if ( killed ) world.kill( tgt, src, hit );

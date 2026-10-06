@@ -46,7 +46,7 @@ export function installMechanics( game, world ) {
 
 	const rt = {
 		game, world, providers: [], stamp: '', ctx: new Map(), states: new Map(), buffs: new Map(), later: [],
-		lastKill: - 99, lastCrit: - 99, lastDodge: - 99, lastBlock: - 99, lastMana: null, nearCheck: 0, near: false, flasks: []
+		lastKill: - 99, lastCrit: - 99, lastDodge: - 99, lastBlock: - 99, nearCheck: 0, near: false, flasks: []
 	};
 	world.state.prog = rt;
 	const E = world.events;
@@ -120,6 +120,13 @@ export function installMechanics( game, world ) {
 
 	} );
 	E.on( 'action', ( ev ) => isPlayer( ev.entity ) && dispatch( rt, 'action', ev ) );
+	E.on( 'manaSpent', ( ev ) => {
+
+		if ( ! isPlayer( ev.entity ) || ! ( ev.amount > 0 ) ) return;
+		refreshProviders( rt );
+		dispatch( rt, 'manaSpent', ev.amount );
+
+	} );
 	E.on( 'flask', ( ev ) => isPlayer( ev.entity ) && dispatch( rt, 'flask', ev ) );
 	E.on( 'pickup', ( ev ) => dispatch( rt, 'pickup', ev ) );
 	refreshProviders( rt );
@@ -374,14 +381,6 @@ function updateMechanics( world, dt ) {
 	S.setFlag( 'no_enemy_near', ! rt.near );
 	S.setFlag( 'in_town', world.kind === 'town' );
 
-	// mana spent since the end of the last step (skills pay costs between steps 15 and 40)
-	if ( rt.lastMana !== null ) {
-
-		const spent = rt.lastMana - p.mana;
-		if ( spent > 0.01 ) dispatch( rt, 'manaSpent', spent );
-
-	}
-
 	// buffs and delayed callbacks
 	for ( const b of [ ...rt.buffs.values() ] ) if ( t >= b.until ) endBuff( rt, b.key );
 	if ( rt.later.length ) {
@@ -402,9 +401,3 @@ function updateMechanics( world, dt ) {
 }
 
 define( 'system', { id: 'prog-mechanics', order: 45, update: updateMechanics } );
-define( 'system', { id: 'prog-mana-mark', order: 99, update( world ) {
-
-	const rt = world.state.prog;
-	if ( rt && world.player ) rt.lastMana = world.player.mana;
-
-} } );

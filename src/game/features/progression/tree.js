@@ -631,20 +631,61 @@ export function ascPointsLeft( save ) {
 
 }
 
-// Repair a save after the tree changed: drop unknown ids and anything no longer
-// connected to the start. Returns the number of refunded nodes.
+// Inspect loaded saves even when their version matches: malformed content can
+// claim the current version. Keep connected nodes within the character's budget;
+// removed allocations automatically become unspent points again.
 export function validateTree( save ) {
 
 	const T = getTree(), t = treeState( save );
-	if ( t.version === T.version ) return 0;
 	const before = t.allocated.length;
 	const root = `s.${t.start}`;
 	const set = new Set( t.allocated.filter( ( id ) => T.nodes.has( id ) ) );
 	set.add( root );
-	const keep = reachable( T, set, root );
-	t.allocated = [ ...keep ];
+	const keep = new Set( [ ...reachable( T, set, root ) ].slice( 0, pointsTotal( save.level, t.bonus ?? 0 ) + 1 ) );
+	t.allocated = [ ...new Set( t.allocated.filter( ( id ) => keep.has( id ) ) ) ];
+	if ( ! t.allocated.includes( root ) ) t.allocated.unshift( root );
 	t.version = T.version;
+	const A = Object.hasOwn( T.asc, t.asc.id ) ? T.asc[ t.asc.id ] : null;
+	if ( ! A || save.level < ASCENDANCY_LEVEL ) t.asc = { id: null, allocated: [] };
+	else {
+
+		const ascRoot = `${t.asc.id}:root`, ascSet = new Set( t.asc.allocated.filter( ( id ) => A.nodes.has( id ) ) );
+		ascSet.add( ascRoot );
+		const ascKeep = new Set( [ ...reachable( A, ascSet, ascRoot ) ].slice( 0, ascPointsTotal( save.level ) + 1 ) );
+		t.asc.allocated = [ ...new Set( t.asc.allocated.filter( ( id ) => ascKeep.has( id ) ) ) ];
+		if ( ! t.asc.allocated.includes( ascRoot ) ) t.asc.allocated.unshift( ascRoot );
+
+	}
 	return before - t.allocated.length;
+
+}
+
+// Portable imports must identify real content before any migration mutates it.
+// Older tree versions may migrate, but invented ids never become valid imports.
+export function validateTreeSave( save ) {
+
+	const T = getTree(), t = save.tree;
+	if ( ! t || typeof t !== 'object' || Array.isArray( t ) || typeof t.start !== 'string' || ! Object.hasOwn( START_INFO, t.start ) ) throw new Error( 'Unknown passive starting region.' );
+	if ( ! Number.isSafeInteger( t.bonus ) || t.bonus < 0 || t.bonus > 10000 ) throw new Error( 'Invalid bonus passive points.' );
+	const valid = ( nodes, ids, root ) => Array.isArray( ids ) && ids.every( ( id ) => typeof id === 'string' && nodes.has( id ) ) &&
+		new Set( ids ).size === ids.length && ids.includes( root ) && reachable( { nodes }, new Set( ids ), root ).size === ids.length;
+	if ( ! valid( T.nodes, t.allocated, `s.${t.start}` ) ) throw new Error( 'Passive nodes must be known, unique and connected to the start.' );
+	if ( t.allocated.length - 1 > pointsTotal( save.level, t.bonus ) ) throw new Error( 'Character has more passive allocations than available points.' );
+	const a = t.asc;
+	if ( ! a || typeof a !== 'object' || Array.isArray( a ) || ! Array.isArray( a.allocated ) ) throw new Error( 'Invalid ascendancy data.' );
+	if ( a.id === null ) {
+
+		if ( a.allocated.length ) throw new Error( 'Ascendancy nodes require an ascendancy.' );
+
+	} else {
+
+		if ( typeof a.id !== 'string' || ! Object.hasOwn( T.asc, a.id ) ) throw new Error( 'Unknown ascendancy.' );
+		if ( save.level < ASCENDANCY_LEVEL ) throw new Error( `Ascendancy requires level ${ASCENDANCY_LEVEL}.` );
+		// Full respecs leave an empty branch until the next loaded-save repair.
+		if ( a.allocated.length && ! valid( T.asc[ a.id ].nodes, a.allocated, `${a.id}:root` ) ) throw new Error( 'Ascendancy nodes must be known, unique and connected to their ascendancy.' );
+		if ( a.allocated.length - 1 > ascPointsTotal( save.level ) ) throw new Error( 'Character has more ascendancy allocations than available points.' );
+
+	}
 
 }
 

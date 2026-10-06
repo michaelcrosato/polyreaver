@@ -169,7 +169,8 @@ define( 'mechanic', {
 		for ( const h of st.hives ) {
 
 			if ( ! h.alive ) continue;
-			const near = Math.hypot( h.x - p.x, h.z - p.z ) < 30;
+			const hx = h.x - p.x, hz = h.z - p.z;
+			const near = hx * hx + hz * hz < 900;
 			h.data.brood += dt * ( near ? 3 + ctx.intensity * 2 : 0.3 );
 			while ( h.data.brood >= 1 ) {
 
@@ -186,6 +187,9 @@ define( 'mechanic', {
 
 		const field = {};
 		const speedBase = 4.6 + Math.min( 1.4, ctx.intensity * 0.4 );
+		const steer = Math.min( 1, dt * 7 );
+		const biteRange2 = ( p.radius + 0.55 ) ** 2;
+		const orbitTime = t * 0.6;
 		let bites = 0;
 		for ( let i = 0; i < st.used; i ++ ) {
 
@@ -199,8 +203,8 @@ define( 'mechanic', {
 			}
 
 			const x = st.x[ i ], z = st.z[ i ];
-			const dxp = p.x - x, dzp = p.z - z, dp = Math.hypot( dxp, dzp );
-			if ( ! st.awake[ i ] && dp < 20 ) st.awake[ i ] = 1;
+			const dxp = p.x - x, dzp = p.z - z, dp2 = dxp * dxp + dzp * dzp;
+			if ( ! st.awake[ i ] && dp2 < 400 ) st.awake[ i ] = 1;
 
 			// what the other mechanics do here (staggered: every 4th step per ashling)
 			let speedMul = 1;
@@ -233,8 +237,9 @@ define( 'mechanic', {
 			if ( st.awake[ i ] && p.alive ) {
 
 				sp = speedBase * ( 0.85 + st.seed[ i ] * 0.3 ) * speedMul;
-				if ( dp < 6 && L.hasLineOfSight( x, z, p.x, p.z ) ) {
+				if ( dp2 < 36 && L.hasLineOfSight( x, z, p.x, p.z ) ) {
 
+					const dp = Math.hypot( dxp, dzp ) || 1;
 					wx = dxp / dp; wz = dzp / dp;
 
 				} else {
@@ -244,7 +249,7 @@ define( 'mechanic', {
 
 				}
 
-				if ( dp < p.radius + 0.55 ) {
+				if ( dp2 < biteRange2 ) {
 
 					bites ++;
 					wx *= 0.2; wz *= 0.2; // latch on
@@ -258,8 +263,8 @@ define( 'mechanic', {
 				sp = 1.6;
 				if ( h ) {
 
-					const a = t * 0.6 + st.seed[ i ] * 6.28;
-					const tx = h.x + Math.cos( a ) * ( 2 + st.seed[ i ] * 4 ), tz = h.z + Math.sin( a ) * ( 2 + st.seed[ i ] * 4 );
+					const a = orbitTime + st.seed[ i ] * 6.28, orbitRadius = 2 + st.seed[ i ] * 4;
+					const tx = h.x + Math.cos( a ) * orbitRadius, tz = h.z + Math.sin( a ) * orbitRadius;
 					const dl = Math.hypot( tx - x, tz - z ) || 1;
 					wx = ( tx - x ) / dl; wz = ( tz - z ) / dl;
 
@@ -289,18 +294,20 @@ define( 'mechanic', {
 
 			// steer
 			const tvx = wx * sp + sx * 8, tvz = wz * sp + sz * 8;
-			const k = Math.min( 1, dt * 7 );
-			st.vx[ i ] += ( tvx - st.vx[ i ] ) * k; st.vz[ i ] += ( tvz - st.vz[ i ] ) * k;
+			st.vx[ i ] += ( tvx - st.vx[ i ] ) * steer; st.vz[ i ] += ( tvz - st.vz[ i ] ) * steer;
 
 			// move with per-axis wall sliding
 			let nx = x + st.vx[ i ] * dt, nz = z + st.vz[ i ] * dt;
-			if ( ! passable( L.tileAt( nx, z ) ) ) {
+			let tx = Math.floor( ( nx - L.ox ) / L.cell );
+			const tz = Math.floor( ( z - L.oz ) / L.cell );
+			if ( ! passable( L.get( tx, tz ) ) ) {
 
 				nx = x; st.vx[ i ] *= - 0.3;
+				tx = Math.floor( ( x - L.ox ) / L.cell );
 
 			}
 
-			if ( ! passable( L.tileAt( nx, nz ) ) ) {
+			if ( ! passable( L.get( tx, Math.floor( ( nz - L.oz ) / L.cell ) ) ) ) {
 
 				nz = z; st.vz[ i ] *= - 0.3;
 
@@ -383,8 +390,8 @@ function sweep( world, st, x, z, r, test, max = Infinity ) {
 		for ( let j = st.gridHead[ c ]; j >= 0; j = st.gridNext[ j ] ) {
 
 			if ( ! st.alive[ j ] ) continue;
-			const dx = st.x[ j ] - x, dz = st.z[ j ] - z, d = Math.hypot( dx, dz );
-			if ( d > r || ( test && ! test( dx, dz, d ) ) ) continue;
+			const dx = st.x[ j ] - x, dz = st.z[ j ] - z;
+			if ( dx * dx + dz * dz > r * r || ( test && ! test( dx, dz, Math.hypot( dx, dz ) ) ) ) continue;
 			kill( st, j );
 			st.pendingXp = ( st.pendingXp ?? 0 ) + 1;
 			if ( ++ n >= max ) return n;
@@ -485,7 +492,7 @@ const out2 = [ 0, 0 ];
 
 function flowDir( L, st, x, z ) {
 
-	const [ tx, tz ] = L.toTile( x, z );
+	const tx = Math.floor( ( x - L.ox ) / L.cell ), tz = Math.floor( ( z - L.oz ) / L.cell );
 	let best = L.inside( tx, tz ) ? st.flow[ L.idx( tx, tz ) ] : 32767, bx = 0, bz = 0;
 	for ( const [ dx, dz ] of DIRS ) {
 
@@ -510,7 +517,7 @@ function flowDir( L, st, x, z ) {
 	}
 
 	// aim at the centre of the downhill tile
-	const [ cx, cz ] = L.toWorld( tx + bx, tz + bz );
+	const cx = L.ox + ( tx + bx + 0.5 ) * L.cell, cz = L.oz + ( tz + bz + 0.5 ) * L.cell;
 	const dx = cx - x, dz = cz - z, l = Math.hypot( dx, dz ) || 1;
 	out2[ 0 ] = dx / l; out2[ 1 ] = dz / l;
 	return out2;

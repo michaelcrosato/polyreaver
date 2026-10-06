@@ -135,6 +135,15 @@ A fast isometric hack-and-slash built on this engine, in the spirit of Path of E
   Conduits, Rift Gates, Magma Tide, Gravity Wells, Echoes, The Swarm, Chrono Fields, Miasma). Depths 13-20 combine
   them. From depth 21 on, levels are generated endlessly from mechanics, themes, palettes, Spore-style monster
   genomes and composed bosses.
+- **Character saves.** The HUD and pause menu open **Character saves**: save status, JSON export/import,
+  previous-character restore and damaged-save recovery. Only one tab owns saving; other tabs can load the latest
+  character or export their session. `#fresh` protects the existing character until an explicit replacement.
+- **Build Planner.** Plan a future level, passive paths, ascendancy, equipment, skills and supports in an isolated
+  draft. Compare stats and requirements, then share or import its `PRB1:` build code. Drafts do not change your character.
+- **Device preferences.** **Controls** in the pause menu records keyboard, mouse and standard-gamepad bindings,
+  reports conflicts and resets either device separately. **Graphics** offers optional adaptive 30/60 fps targets,
+  with a resolution ceiling and a 50% floor. Choosing a resolution returns to manual control. Preferences stay on
+  this device; character exports do not transfer them.
 
 | | |
 |---|---|
@@ -142,6 +151,11 @@ A fast isometric hack-and-slash built on this engine, in the spirit of Path of E
 | Controls | WASD move · LMB attack (hold to combo) · RMB / 1-4 skills · Space dodge roll · Q potion, R/Z/X flasks · F interact · I bag · T tree · K skills · C character · Tab map · V camera (iso / over-the-shoulder / top-down) · Esc menu (difficulty sliders, Workshop) · gamepad and touch twin-stick supported |
 | For AI agents | [`docs/AGENTS.md`](docs/AGENTS.md): JSON command API (`game.api`), the Workshop asset galleries, a playtest bot, a headless balance sim, the Claude link. The contract: [`docs/GAME.md`](docs/GAME.md) |
 | Headless | `npm run sim -- --depth 1-20` plays the real game in Node with the bot and prints a balance table |
+
+`npm run test:regression` checks saving, combat, collision, input, planning, graphics control and crowd lifecycle
+without a browser. After `npm run build`, `npm run test:features` exercises the seven feature flows in Chromium.
+`npm run bench:game -- --base-ref 0fd607c --seconds 45 --runs 7` compares CPU paths while checking identical
+seeded outcomes. See [the audit implementation record](docs/AUDIT_FIXES.md) for changes, evidence and limits.
 
 ## Running the crowd benchmark
 

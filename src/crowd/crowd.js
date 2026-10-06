@@ -28,9 +28,10 @@ import { uniform, uniformArray, instancedArray, varyingProperty } from 'three/ts
 import { getModels } from './models.js';
 import { makeClipTable, makeProcTable, animMemory } from './anim.js';
 import { CLIP_RATE } from './clips.js';
-import { buildComputes, MAX_PROXIES } from './sim.js';
+import { buildComputes } from './sim.js';
 import { ensureLodBuffers, buildCull, updateCullUniforms, maybeReadback, cullMemory } from './cull.js';
 import { vertexNode, vat, makeMaterial, makeBlobMaterial, rebuildMeshes } from './materials.js';
+import { crowdCapacityLimit } from './limits.js';
 
 export { withPreviousPosition } from './materials.js';
 
@@ -42,6 +43,8 @@ export class Crowd {
 
 		this.renderer = renderer;
 		this.scene = scene;
+		this.limits = options.limits || renderer.backend?.device?.limits || {};
+		this.storageGeneration = 0;
 		// Optional domain profile is installed before allocation/kernel construction.
 		// The default stress test retains its existing simulation and model indices.
 		this.profile = options.profile || null;
@@ -50,6 +53,8 @@ export class Crowd {
 
 		this.capacity = 0;
 		this.count = options.count ?? 20000;
+		if ( ! Number.isFinite( this.count ) ) throw new RangeError( 'Crowd count must be finite.' );
+		this.count = Math.max( 1, Math.floor( this.count ) );
 		this.tier = this.profile?.tier ?? 0;
 		this.path = this.profile?.path ?? 'direct';
 		this.materialKind = 'unlit';
@@ -80,6 +85,7 @@ export class Crowd {
 			speedScale: uniform( 1 ),
 			behaviour: uniform( 0 ),
 			count: uniform( 1 ),
+			initOffset: uniform( 0, 'uint' ),
 			heroPos: uniform( new THREE.Vector2() ),
 			heroHeading: uniform( 0 ),
 			heroState: uniform( 0 ),
@@ -129,13 +135,16 @@ export class Crowd {
 	// -----------------------------------------------------------------------
 	setCapacity( capacity ) {
 
-		capacity = Math.ceil( capacity / 64 ) * 64;
+		if ( ! Number.isFinite( capacity ) || capacity < 1 ) throw new RangeError( 'Crowd capacity must be a positive finite number.' );
+		capacity = Math.min( Math.ceil( capacity / 64 ) * 64, crowdCapacityLimit( this.limits, { collide: this.collide } ) );
+		if ( capacity < 64 ) throw new RangeError( 'GPU limits cannot support the crowd buffers and 64-thread compute kernels.' );
 		if ( capacity === this.capacity ) return;
 
 		this._disposeMeshes();
 		this._freeStorage();
 		this.capacity = capacity;
 		this.count = Math.min( this.count, capacity );
+		this.storageGeneration ++;
 
 		this.renderBuf = instancedArray( capacity, 'vec4' ).setName( 'crowdRender' );
 		this.simBuf = instancedArray( capacity, 'vec4' ).setName( 'crowdSim' );
@@ -146,6 +155,7 @@ export class Crowd {
 		this.lodBufs = null;
 		this.lodGeos = null;
 		this.casterBufs = null;
+		this._initializedCount = 0;
 		this._needsInit = true;
 		this.profile?.allocate?.( this );
 		this._buildComputes();
@@ -220,6 +230,7 @@ export class Crowd {
 
 	setCount( n ) {
 
+		if ( ! Number.isFinite( n ) ) throw new RangeError( 'Crowd count must be finite.' );
 		const count = Math.max( 1, Math.min( Math.floor( n ), this.capacity ) );
 		if ( this.citySurface && count !== this.count ) this._needsInit = true;
 		this.count = count;
@@ -234,7 +245,7 @@ export class Crowd {
 		this.cityOrigin = texture ? uniform( new THREE.Vector2( origin.x, origin.z ) ) : null;
 		this._buildComputes();
 		this._needsInit = true;
-		old?.dispose();
+		if ( old !== texture ) old?.dispose();
 
 	}
 
@@ -273,6 +284,12 @@ export class Crowd {
 				recompute = true;
 
 			}
+
+		}
+		if ( this.capacity > crowdCapacityLimit( this.limits, { collide: this.collide } ) ) {
+
+			this.setCapacity( this.capacity );
+			recompute = rebuild = false; // allocation already rebuilt kernels and meshes
 
 		}
 
@@ -335,6 +352,7 @@ export class Crowd {
 	// -----------------------------------------------------------------------
 	update( dt, time, camera, viewportHeight ) {
 
+		if ( this.disposed ) return;
 		if ( this.profile?.update ) return this.profile.update( this, dt, time, camera, viewportHeight );
 
 		const u = this.u;
@@ -346,7 +364,7 @@ export class Crowd {
 
 		if ( this.path === 'gpu' ) this._updateCullUniforms( camera, viewportHeight );
 		this.renderer.compute( this._activeComputes() );
-		this._needsInit = false;
+		this._completeInitialization();
 		if ( this.collider ) this.collider.u.blast.value.w = 0; // explosion is a one-frame pulse
 		if ( this.path === 'gpu' ) this._maybeReadback();
 
@@ -360,13 +378,47 @@ export class Crowd {
 
 	}
 
+	// Readbacks for Rapier may precede the first rendered frame. Seed their active
+	// positions without advancing simulation or requiring a camera/cull dispatch.
+	initialize() {
+
+		this.u.count.value = this.count;
+		if ( ! this._prepareInitialization() ) return;
+		this.renderer.compute( this.initCompute );
+		this._completeInitialization();
+
+	}
+
+	_prepareInitialization() {
+
+		this._initializationEnd = undefined;
+		const end = Math.max( 2, this.count );
+		const start = this._needsInit ? 0 : Math.min( this._initializedCount, end );
+		if ( start === end ) return false;
+		this.u.initOffset.value = start;
+		this.initCompute.count = end - start;
+		this._initializationEnd = end;
+		return true;
+
+	}
+
+	_completeInitialization() {
+
+		if ( this._initializationEnd === undefined ) return;
+		this._initializedCount = this._needsInit ? this._initializationEnd : Math.max( this._initializedCount, this._initializationEnd );
+		this._initializationEnd = undefined;
+		this._needsInit = false;
+
+	}
+
 	_activeComputes() {
 
 		const computes = [];
-		if ( this._needsInit ) computes.push( this.initCompute );
+		if ( this._prepareInitialization() ) computes.push( this.initCompute );
 
 		if ( this.collide && this.collider ) {
 
+			this.collider.updateSearchRadius();
 			this.collider.insertCompute.count = this.count;
 			this.collider.obstacleCompute.count = Math.max( 1, this.collider.numObstacles );
 			computes.push( this.collider.clearCompute, this.collider.insertCompute, this.collider.obstacleCompute );
@@ -429,7 +481,7 @@ export class Crowd {
 			this.renderer.getArrayBufferAsync( this.proxyBuf.value ),
 			this.renderer.getArrayBufferAsync( this.proxyCounter.value )
 		] );
-		return { list: new Float32Array( list ), count: Math.min( new Uint32Array( cnt )[ 0 ], MAX_PROXIES ) };
+		return { list: new Float32Array( list ), count: Math.min( new Uint32Array( cnt )[ 0 ], this.proxyCapacity ) };
 
 	}
 
@@ -517,36 +569,64 @@ export class Crowd {
 	// Release old storage buffers right away instead of waiting for garbage collection.
 	_freeStorage() {
 
+		this._disposeComputes();
 		const attrs = this.renderer._attributes;
-		if ( ! attrs || ! this.renderBuf ) return;
 		this.profile?.free?.( this );
-		const list = [ this.renderBuf, this.simBuf, this.animBuf, this.boneBuf, ...( this.lodBufs || [] ), ...( this.lodAnimBufs || [] ),
+		const list = [ this.renderBuf, this.simBuf, this.animBuf, this.boneBuf, this.rapierIO, this.proxyBuf, this.proxyCounter, ...( this.lodBufs || [] ), ...( this.lodAnimBufs || [] ),
 			...( this.casterBufs || [] ), ...( this.casterAnimBufs || [] ) ].filter( Boolean ).map( ( n ) => n.value );
 		if ( this.drawArgs ) list.push( this.drawArgs );
 		for ( const a of list ) {
 
 			try {
 
-				attrs.delete( a );
+				attrs?.delete( a );
 
 			} catch { /* not uploaded yet */ }
 
 		}
 
 		if ( this.collider ) this.collider.dispose( this.renderer );
+		// These indirect wrappers are owned here; source model geometry remains
+		// reusable. Its shared vertex attributes can be uploaded again if needed.
+		for ( const geometry of new Set( [ ...( this.lodGeos || [] ), ...( this.casterGeos || [] ) ] ) ) geometry.dispose();
 		this.drawArgs = null;
 		this.boneBuf = null;
 		this.boneCap = 0;
+		this.rapierIO = this.proxyBuf = this.proxyCounter = null;
+		this.collider = null;
+		this.lodBufs = this.lodAnimBufs = this.casterBufs = this.casterAnimBufs = null;
+		this.lodGeos = this.casterGeos = null;
+		this.visibleByTier.fill( 0 ); this.castersByTier.fill( 0 );
+
+	}
+
+	_disposeComputes() {
+
+		for ( const key of [ 'initCompute', 'simCompute', 'skelCompute', 'proxyReset', 'proxyGather', 'resetCompute' ] ) {
+
+			this[ key ]?.dispose(); this[ key ] = null;
+
+		}
+		for ( const key of [ 'cullPasses', 'casterPasses' ] ) {
+
+			for ( const compute of this[ key ] || [] ) compute.dispose();
+			this[ key ] = null;
+
+		}
 
 	}
 
 	dispose() {
 
+		if ( this.disposed ) return;
 		this.disposed = true;
 		this._disposeMeshes();
 		this._freeStorage();
 		this.scene.remove( this.group );
 		this.citySurface?.dispose();
+		for ( const texture of this.vatTextures ) texture?.dispose();
+		this.boneTexture?.dispose();
+		this.blobGeo?.dispose();
 
 	}
 

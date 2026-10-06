@@ -321,6 +321,7 @@ function updateMovement( world, dt ) {
 		}
 
 		e.x = nx; e.z = nz;
+		world.spatial.update( e );
 
 		// vertical (leaps, knock-ups)
 		if ( e.y > 0 || e.vy !== 0 ) {
@@ -341,16 +342,17 @@ function updateMovement( world, dt ) {
 	for ( const e of world.entities ) {
 
 		if ( ! e.alive || ! e.solid || e.flags.ghost ) continue;
-		for ( const o of world.spatial.query( e.x, e.z, e.radius, ( o ) => o !== e && o.alive && o.solid && ! o.flags.ghost ) ) {
+		world.spatial.forEach( e.x, e.z, e.radius, ( o ) => {
 
 			const dx = e.x - o.x, dz = e.z - o.z, d = Math.hypot( dx, dz ) || 0.001;
 			const overlap = e.radius + o.radius - d;
-			if ( overlap <= 0 ) continue;
+			if ( overlap <= 0 ) return;
 			const wE = o.mass / ( e.mass + o.mass );
 			const push = overlap * 0.5 * wE;
 			e.x += dx / d * push; e.z += dz / d * push;
 
-		}
+		}, ( o ) => o !== e && o.alive && o.solid && ! o.flags.ghost );
+		world.spatial.update( e );
 
 	}
 
@@ -438,6 +440,7 @@ const WALLS_ONLY = new Set( [ 0, 2 ] );
 export const CORE_SYSTEMS = [
 	{ id: 'core:actions', order: 30, update: updateActions },
 	{ id: 'core:movement', order: 50, update: updateMovement },
+	{ id: 'core:spatial', order: 59, update: ( world ) => world.spatial.refresh( world.entities ) },
 	{ id: 'core:effects', order: 60, update: updateEffects },
 	{ id: 'core:statuses', order: 70, update: updateStatuses },
 	{ id: 'core:regen', order: 80, update: updateRegen },

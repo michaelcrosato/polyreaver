@@ -8,12 +8,12 @@
 
 import { define, get } from '../../../core/registry.js';
 import { h } from '../../../ui/shell.js';
-import { SLOT_ACTIONS, readLoadout, makeContext, skillLevel, supportList, skillTooltip } from '../skill-core.js';
+import { SLOT_ACTIONS, readLoadout, makeContext, skillLevel, supportList, skillTooltip, skillCost } from '../skill-core.js';
 import { iconURL } from './icons.js';
 import { elementOf } from './palette.js';
 import { touchUI } from './touch-ui.js';
 import { settings, setSetting, onSetting } from './settings.js';
-import { PAD_LABELS, KEY_LABELS } from './input.js';
+import { controlLabel } from './controls.js';
 import { CAMERA_MODES } from './camera.js';
 
 const SLOTS = [ ...SLOT_ACTIONS, 'potion', 'dodge' ];
@@ -138,16 +138,17 @@ define( 'uiPanel', { id: 'skillbar', order: 30,
 			for ( const r of rows ) r.sync();
 			const mode = game.rc?.camMode ?? settings.camera;
 			camBtns.forEach( ( b, i ) => b.classList.toggle( 'on', CAMERA_MODES[ i ] === mode ) );
+			cameraLabel.textContent = `Camera (${controlLabel( 'camera' )}):`;
+			help.textContent = `Keyboard: ${controlLabel( 'up', 'keyboard', true )} forward · mouse aim · ${controlLabel( 'attack' )} attack · ${controlLabel( 'skill1' )} / ${[ 'skill2', 'skill3', 'skill4', 'skill5' ].map( ( a ) => controlLabel( a ) ).join( ' ' )} skills · ${controlLabel( 'dodge' )} dodge · ${controlLabel( 'potion' )} potion · ${controlLabel( 'interact' )} interact. Gamepad: sticks move / aim · ${controlLabel( 'attack', 'gamepad' )} attack · ${controlLabel( 'dodge', 'gamepad' )} dodge · ${controlLabel( 'potion', 'gamepad' )} potion. Customize in Controls. Touch: left thumb moves · tap to auto-aim, drag to aim · pinch to zoom.`;
 
 		};
 
 		this.syncOptions = sync;
-		const help = h( 'p', { class: 'dim', html: '<b>Keyboard</b>: WASD move · mouse aim · LMB attack · RMB / 1-4 skills · Space dodge · Q potion · F interact · V camera · wheel zoom<br>' +
-			'<b>Gamepad</b>: sticks move / aim · A attack · X Y RB RT LB skills · B dodge · LT potion · d-pad ↓ interact, → camera<br>' +
-			'<b>Touch</b>: left thumb moves · tap a skill to auto-aim, drag it to aim · pinch to zoom' } );
+		const help = h( 'p', { class: 'dim' } );
+		const cameraLabel = h( 'span' );
 		const section = h( 'div', { class: 'pr-options' },
 			h( 'h3', { text: 'Combat, camera & audio' } ),
-			h( 'div', { class: 'btns' }, h( 'span', { text: 'Camera (V):' } ), ...camBtns ),
+			h( 'div', { class: 'btns' }, cameraLabel, ...camBtns ),
 			h( 'div', { class: 'tuning' }, rows ), help );
 		// players look for camera and volume before the debug sliders: above the first h3
 		if ( pause ) pause.el.insertBefore( section, pause.el.querySelector( 'h3' ) );
@@ -180,17 +181,20 @@ define( 'uiPanel', { id: 'skillbar', order: 30,
 		const slots = touch ? this.tslots : this.slots;
 		const lo = readLoadout( game.save );
 		const device = game.input.device;
-		const labels = device === 'gamepad' ? PAD_LABELS : KEY_LABELS;
+		const bindingDevice = device === 'gamepad' ? 'gamepad' : 'keyboard';
 
 		// mana costs refresh a few times a second (they depend on stats and supports)
 		this.costAt -= dt;
 		if ( this.costAt <= 0 ) {
 
 			this.costAt = 0.25;
+			this.costTags = [];
 			this.costs = lo.bar.map( ( id ) => {
 
 				const sk = id && get( 'skill', id );
-				return sk ? makeContext( w, p, sk, skillLevel( lo, id, p ), supportList( lo, id ), { preview: true } ).manaCost : 0;
+				const ctx = sk ? makeContext( w, p, sk, skillLevel( lo, id, p ), supportList( lo, id ), { preview: true } ) : null;
+				this.costTags.push( ctx?.tags ?? [] );
+				return ctx?.manaCost ?? 0;
 
 			} );
 
@@ -217,7 +221,9 @@ define( 'uiPanel', { id: 'skillbar', order: 30,
 				}
 
 				const cost = this.costs?.[ i ] ?? 0;
-				s.el.classList.toggle( 'nomana', !! id && p.mana < cost );
+				const payment = skillCost( p, cost, this.costTags?.[ i ] ?? [] );
+				s.el.classList.toggle( 'nomana', !! id && ! payment.affordable );
+				s.cost.style.color = payment.life ? '#ff9b9b' : payment.shield ? '#c0c9ff' : '';
 				const ct = cost ? String( cost ) : '';
 				if ( s.cost.textContent !== ct ) s.cost.textContent = ct;
 
@@ -228,7 +234,7 @@ define( 'uiPanel', { id: 'skillbar', order: 30,
 
 			}
 
-			const label = touch ? '' : labels[ s.action ] ?? '';
+			const label = touch ? '' : controlLabel( s.action, bindingDevice );
 			if ( s.label !== label ) s.key.textContent = s.label = label;
 
 			// cooldown sweep: a conic mask that unwinds clockwise

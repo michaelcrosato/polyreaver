@@ -39,6 +39,12 @@ jobs:
       - if: steps.changed.outputs.run == 'true'
         run: npm run build
       - if: steps.changed.outputs.run == 'true'
+        run: npm run test:regression
+      - if: steps.changed.outputs.run == 'true'
+        run: npm run test:features -- --shots smoke-shots/features
+      - if: steps.changed.outputs.run == 'true'
+        run: npm run test:render
+      - if: steps.changed.outputs.run == 'true'
         run: npm run smoke -- --shots smoke-shots
       - if: steps.changed.outputs.run == 'true'
         run: npm run smoke:game -- --shots smoke-shots/game

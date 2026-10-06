@@ -68,12 +68,56 @@ export function defaultLoadout() {
 
 // Keep the loadout valid as skills get registered / removed (also fixes saves made
 // before the combat feature existed: their bar is filled in on first load).
-export function ensureLoadout( save ) {
+// Save migrations request full content repair once; ordinary stat/loot calls
+// only maintain the small active bar and known-skill list.
+export function ensureLoadout( save, { repair = false } = {} ) {
 
 	const s = skillsOf( save );
 	if ( ! all( 'skill' ).length ) return;
-	for ( let i = 0; i < 6; i ++ ) if ( s.bar[ i ] && ! get( 'skill', s.bar[ i ] ) ) s.bar[ i ] = null;
-	s.known = s.known.filter( ( id ) => get( 'skill', id ) );
+	const unlocked = ( id ) => typeof id === 'string' && get( 'skill', id ) && levelReq( get( 'skill', id ) ) <= save.level;
+	const seen = new Set();
+	for ( let i = 0; i < 6; i ++ ) {
+
+		const id = s.bar[ i ];
+		if ( ! unlocked( id ) || seen.has( id ) ) s.bar[ i ] = null;
+		else seen.add( id );
+
+	}
+	s.known = s.known.filter( unlocked );
+	if ( repair ) {
+
+		for ( const key of [ 'levels', 'xp' ] ) for ( const id of Object.keys( s[ key ] ) ) {
+
+			if ( ! get( 'skill', id ) ) { delete s[ key ][ id ]; continue; }
+			const value = s[ key ][ id ];
+			s[ key ][ id ] = key === 'levels' ? Math.min( maxSkillLevel( save.level ), Math.max( 1, Math.round( value ) ) ) : value;
+
+		}
+		for ( const id of Object.keys( s.runes ) ) {
+
+			if ( ! get( 'support', id ) ) delete s.runes[ id ];
+			else s.runes[ id ] = Math.round( s.runes[ id ] );
+
+		}
+		// Returning known runes preserves owned content when their old sockets no
+		// longer fit. Removed registry ids remain available in the original Recovery.
+		for ( const [ id, supports ] of Object.entries( s.supports ) ) {
+
+			const skill = get( 'skill', id ), kept = [];
+			for ( const sid of supports ) {
+
+				const support = get( 'support', sid );
+				if ( ! support ) continue;
+				if ( skill && supportFits( skill, support ) && levelReq( support ) <= save.level && ! kept.includes( sid ) && kept.length < supportSlots( save ) ) kept.push( sid );
+				else s.runes[ sid ] = Math.min( Number.MAX_SAFE_INTEGER, ( s.runes[ sid ] || 0 ) + 1 );
+
+			}
+			if ( skill ) s.supports[ id ] = kept;
+			else delete s.supports[ id ];
+
+		}
+
+	}
 	if ( ! s.bar[ 0 ] ) {
 
 		const d = defaultLoadout();
@@ -88,6 +132,46 @@ export function ensureLoadout( save ) {
 
 	for ( const id of s.bar ) if ( id && ! s.known.includes( id ) ) s.known.push( id );
 	for ( const id of s.known ) s.levels[ id ] ??= 1;
+
+}
+
+// Validate content before a portable character can replace the stored one.
+// Missing legacy maps are filled by migrations; supplied ids and values must be
+// real registry content and obey the same rules as learning/socketing in play.
+export function validateSkillsSave( save ) {
+
+	const s = save.skills, known = s.known;
+	const unlocked = ( id ) => typeof id === 'string' && get( 'skill', id ) && levelReq( get( 'skill', id ) ) <= save.level;
+	if ( known.some( ( id ) => ! unlocked( id ) ) || new Set( known ).size !== known.length ) throw new Error( 'Known skills must be registered, unique and unlocked.' );
+	const bar = s.bar.filter( ( id ) => id !== null );
+	if ( bar.some( ( id ) => ! unlocked( id ) ) || new Set( bar ).size !== bar.length ) throw new Error( 'Skill bar entries must be registered, unique and unlocked.' );
+	for ( const key of [ 'levels', 'xp', 'runes', 'supports' ] ) {
+
+		if ( s[ key ] === undefined ) continue;
+		if ( ! s[ key ] || typeof s[ key ] !== 'object' || Array.isArray( s[ key ] ) ) throw new Error( `Invalid skill ${key} map.` );
+		for ( const [ id, value ] of Object.entries( s[ key ] ) ) {
+
+			const def = get( key === 'runes' ? 'support' : 'skill', id );
+			if ( ! def ) throw new Error( `Unknown ${key === 'runes' ? 'support rune' : 'skill'} in ${key}.` );
+			if ( key === 'supports' ) {
+
+				if ( ! Array.isArray( value ) || value.length > supportSlots( save ) || new Set( value ).size !== value.length ) throw new Error( 'Invalid support sockets.' );
+				for ( const sid of value ) {
+
+					const support = typeof sid === 'string' ? get( 'support', sid ) : null;
+					if ( ! support || ! supportFits( def, support ) || levelReq( support ) > save.level ) throw new Error( 'Unknown, incompatible or locked support.' );
+
+				}
+
+			} else if ( key === 'levels' ) {
+
+				if ( ! Number.isInteger( value ) || value < 1 || value > maxSkillLevel( save.level ) ) throw new Error( 'Invalid skill level for the character level.' );
+
+			} else if ( ! Number.isFinite( value ) || value < 0 || value > Number.MAX_SAFE_INTEGER || key === 'runes' && ! Number.isInteger( value ) ) throw new Error( `Invalid skill ${key} value.` );
+
+		}
+
+	}
 
 }
 

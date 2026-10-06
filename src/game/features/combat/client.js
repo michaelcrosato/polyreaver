@@ -14,6 +14,7 @@
 //   client/audio.js      renderSystem 'combat-audio': procedural WebAudio SFX
 //   client/hud.js        uiPanel 'skillbar': skill slots, buffs, touch overlay, pause options
 //     icons.js           procedural canvas icons     settings.js per-device options
+//     controls.js        separate keyboard/gamepad preferences + Controls editor
 //     palette.js         element colours shared by every visual
 
 import './sim.js';
@@ -22,3 +23,4 @@ import './client/input.js';
 import './client/fx.js';
 import './client/audio.js';
 import './client/hud.js';
+import './client/controls-ui.js';

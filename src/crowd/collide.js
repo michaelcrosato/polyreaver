@@ -5,7 +5,7 @@
 //                 index to the bucket of the 1 m cell it stands in
 //   3. obstacles  props + physics bodies near the ground are appended (O threads)
 //                 with index = capacity + obstacleId
-//   4. (sim)      each agent scans the 3x3 cells around it and pushes itself out of
+//   4. (sim)      each agent scans nearby cells for its collision radius and pushes itself out of
 //                 overlapping agents / obstacles; fast bodies knock agents over.
 //
 // Buckets have a fixed capacity (K) so no prefix sum / sort is needed: if more than
@@ -22,11 +22,18 @@ import {
 	Fn, If, Loop, float, int, uint, vec2, uniform, uniformArray, instancedArray, instanceIndex,
 	atomicAdd, atomicStore, atomicLoad, floor, min, sqrt, dot, max, ivec2
 } from 'three/tsl';
+import { COLLISION_BUCKET, collisionTableSize, storageByteLimit, computeCountLimit } from './limits.js';
 
 export const CELL = 1.0;
-export const BUCKET = 8;
+export const BUCKET = COLLISION_BUCKET;
 export const MAX_OBSTACLES = 32768;
 export const MAX_BIG = 8;
+
+export function collisionSearchRadius( radius, obstacleRadius = 0 ) {
+
+	return Math.max( 1, Math.ceil( Math.max( radius * 2, radius + obstacleRadius ) / CELL ) );
+
+}
 
 function hashCell( c, mask ) {
 
@@ -36,10 +43,14 @@ function hashCell( c, mask ) {
 
 export class CrowdCollider {
 
-	constructor( capacity ) {
+	constructor( capacity, limits = {} ) {
 
-		let table = 4096;
-		while ( table < capacity ) table *= 2;
+		const table = collisionTableSize( capacity );
+		if ( table * ( BUCKET + 1 ) * 4 > storageByteLimit( limits ) || table > computeCountLimit( limits ) ) {
+
+			throw new RangeError( 'Crowd collision grid exceeds GPU buffer or dispatch limits.' );
+
+		}
 		this.capacity = capacity;
 		this.table = table;
 		this.mask = uint( table - 1 );
@@ -50,12 +61,15 @@ export class CrowdCollider {
 		this.phys = instancedArray( capacity, 'vec4' ).setName( 'crowdPhys' );
 
 		// Obstacles (CPU -> GPU): [ xyz + radius, velocity xyz + speed ] per obstacle.
-		this.obs = instancedArray( MAX_OBSTACLES * 2, 'vec4' ).setName( 'obstacles' );
+		this.obstacleCapacity = Math.min( MAX_OBSTACLES, Math.floor( storageByteLimit( limits ) / 32 ), computeCountLimit( limits ) );
+		this.obs = instancedArray( this.obstacleCapacity * 2, 'vec4' ).setName( 'obstacles' );
 		this.numObstacles = 0;
+		this.maxObstacleRadius = 0;
 
 		this.u = {
 			numObs: uniform( 0, 'uint' ),
 			radius: uniform( 0.28 ),
+			searchRadius: uniform( 1, 'int' ),
 			stiffness: uniform( 1.0 ),
 			knockSpeed: uniform( 2.5 ),
 			knockOn: uniform( 1 ),
@@ -68,6 +82,7 @@ export class CrowdCollider {
 
 	buildComputes( renderBuf ) {
 
+		for ( const compute of [ this.clearCompute, this.insertCompute, this.obstacleCompute ] ) compute?.dispose();
 		const { grid, snap, obs, mask } = this;
 		const cap = uint( this.capacity );
 		const B1 = BUCKET + 1;
@@ -115,7 +130,7 @@ export class CrowdCollider {
 
 			} );
 
-		} )().compute( MAX_OBSTACLES ).setName( 'Grid Insert Obstacles' );
+		} )().compute( this.obstacleCapacity ).setName( 'Grid Insert Obstacles' );
 
 	}
 
@@ -132,20 +147,25 @@ export class CrowdCollider {
 		const hit = float( 0 ).toVar( 'hit' );
 		const cell = ivec2( floor( pos.div( CELL ) ) ).toVar( 'cell' );
 
-		for ( let dz = - 1; dz <= 1; dz ++ ) {
+		const range = u.searchRadius;
+		// Nested TSL loops need distinct WGSL names; the default i shadows the outer loop.
+		Loop( { start: range.negate(), end: range.add( 1 ), type: 'int', condition: '<', name: 'cellZ' }, ( { cellZ: dz } ) => {
 
-			for ( let dx = - 1; dx <= 1; dx ++ ) {
+			Loop( { start: range.negate(), end: range.add( 1 ), type: 'int', condition: '<', name: 'cellX' }, ( { cellX: dx } ) => {
 
-				const h = hashCell( cell.add( ivec2( dx, dz ) ), mask ).mul( B1 ).toVar();
+				const targetCell = cell.add( ivec2( dx, dz ) ).toVar();
+				const h = hashCell( targetCell, mask ).mul( B1 ).toVar();
 				const n = min( atomicLoad( grid.element( h ) ), uint( BUCKET ) ).toVar();
-				Loop( { start: uint( 0 ), end: n, type: 'uint', condition: '<' }, ( { i: s } ) => {
+				Loop( { start: uint( 0 ), end: n, type: 'uint', condition: '<', name: 'bucketSlot' }, ( { bucketSlot: s } ) => {
 
 					const j = atomicLoad( grid.element( h.add( 1 ).add( s ) ) ).toVar();
 					If( j.lessThan( cap ), () => {
 
-						If( j.notEqual( i ), () => {
+						const neighbor = snap.element( j ).toVar();
+						const neighborCell = ivec2( floor( neighbor.div( CELL ) ) ).toVar();
+						If( j.notEqual( i ).and( neighborCell.x.equal( targetCell.x ) ).and( neighborCell.y.equal( targetCell.y ) ), () => {
 
-							const d = pos.sub( snap.element( j ) ).toVar();
+							const d = pos.sub( neighbor ).toVar();
 							const d2 = dot( d, d );
 							const minD = R.mul( 2 );
 							If( d2.lessThan( minD.mul( minD ) ).and( d2.greaterThan( 1e-8 ) ), () => {
@@ -161,10 +181,12 @@ export class CrowdCollider {
 
 						const o = j.sub( cap );
 						const ob = obs.element( o.mul( 2 ) );
+						const obstacleCell = ivec2( floor( ob.xz.div( CELL ) ) );
 						const d = pos.sub( ob.xz ).toVar();
 						const d2 = dot( d, d );
 						const minD = R.add( ob.w );
-						If( d2.lessThan( minD.mul( minD ) ).and( d2.greaterThan( 1e-8 ) ), () => {
+						If( d2.lessThan( minD.mul( minD ) ).and( d2.greaterThan( 1e-8 ) )
+							.and( obstacleCell.x.equal( targetCell.x ) ).and( obstacleCell.y.equal( targetCell.y ) ), () => {
 
 							const dist = sqrt( d2 );
 							const n2 = d.div( dist );
@@ -183,9 +205,9 @@ export class CrowdCollider {
 
 				} );
 
-			}
+			} );
 
-		}
+		} );
 
 		// Big obstacles (monument, wrecking ball) are checked by every agent.
 		for ( let b = 0; b < MAX_BIG; b ++ ) {
@@ -229,23 +251,35 @@ export class CrowdCollider {
 	// CPU side: upload obstacle list (xyz r) + velocities (xyz speed).
 	upload( count ) {
 
-		this.numObstacles = Math.min( count, MAX_OBSTACLES );
+		this.numObstacles = Math.min( count, this.obstacleCapacity );
 		this.u.numObs.value = this.numObstacles;
 		const attr = this.obs.value;
+		this.maxObstacleRadius = 0;
+		for ( let i = 0; i < this.numObstacles; i ++ ) this.maxObstacleRadius = Math.max( this.maxObstacleRadius, attr.array[ i * 8 + 3 ] );
+		this.updateSearchRadius();
 		attr.clearUpdateRanges();
 		attr.addUpdateRange( 0, Math.max( 8, this.numObstacles * 8 ) );
 		attr.needsUpdate = true;
 
 	}
 
+	updateSearchRadius() {
+
+		this.u.searchRadius.value = collisionSearchRadius( this.u.radius.value, this.maxObstacleRadius );
+
+	}
+
 	get memoryBytes() {
 
-		return this.table * ( BUCKET + 1 ) * 4 + this.capacity * ( 8 + 16 ) + MAX_OBSTACLES * 32;
+		return this.table * ( BUCKET + 1 ) * 4 + this.capacity * ( 8 + 16 ) + this.obstacleCapacity * 32;
 
 	}
 
 	dispose( renderer ) {
 
+		if ( this.disposed ) return;
+		this.disposed = true;
+		for ( const compute of [ this.clearCompute, this.insertCompute, this.obstacleCompute ] ) compute?.dispose();
 		const attrs = renderer._attributes;
 		if ( ! attrs ) return;
 		for ( const n of [ this.grid, this.snap, this.phys, this.obs ] ) {

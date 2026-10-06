@@ -46,8 +46,8 @@ export function ensureLodBuffers( crowd ) {
 
 	// One geometry per LOD tier sharing the model's vertex buffers but with its own
 	// indirect-args offset (a second set reads the shadow-caster records). Never
-	// disposed: disposing a geometry in three.js also destroys the storage buffers
-	// its materials read.
+	// disposed only when their owned storage is freed: three.js also destroys the
+	// storage buffers their materials read when the wrappers are disposed.
 	const tierGeometry = ( m, record ) => {
 
 		const src = m.geometry;
@@ -125,6 +125,8 @@ function makeCullPass( crowd, draw, { tiers, planes, record, bufs, animBufs, nam
 
 export function buildCull( crowd ) {
 
+	crowd.resetCompute?.dispose();
+	for ( const compute of crowd.cullPasses || [] ) compute.dispose();
 	const draw = storage( crowd.drawArgs, 'uint', 40 ).toAtomic();
 	crowd.resetCompute = Fn( () => {
 
@@ -179,6 +181,7 @@ export function ensureCasters( crowd ) {
 // the GPU-driven path.
 function buildCasterCull( crowd ) {
 
+	for ( const compute of crowd.casterPasses || [] ) compute.dispose();
 	const draw = storage( crowd.drawArgs, 'uint', 40 ).toAtomic();
 	crowd.casterPasses = [ [ 0, 1 ], [ 2, 3 ] ]
 		.map( ( pair ) => pair.filter( ( k ) => crowd.casterBufs[ k ] ) )
@@ -275,8 +278,10 @@ export function maybeReadback( crowd ) {
 	if ( crowd._readbackPending || now - crowd._lastReadback < 400 ) return;
 	crowd._readbackPending = true;
 	crowd._lastReadback = now;
+	const generation = crowd.storageGeneration;
 	crowd.renderer.getArrayBufferAsync( crowd.drawArgs ).then( ( buf ) => {
 
+		if ( crowd.disposed || generation !== crowd.storageGeneration ) { crowd._readbackPending = false; return; }
 		const a = new Uint32Array( buf );
 		for ( let k = 0; k < 4; k ++ ) {
 

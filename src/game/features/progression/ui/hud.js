@@ -19,10 +19,11 @@ import { lootEntities, pickupLoot, dropLabel } from '../loot.js';
 import { pointsLeft, pointsTotal, ascPointsLeft, treeState } from '../tree.js';
 import { injectCss } from './style.js';
 import { get } from '../../../core/registry.js';
+import { controlLabel, controls } from '../../combat/client/controls.js';
 
 const FLASK_COLORS = { life: '#d83030', mana: '#3060e0', hybrid: '#a040c0', utility: '#c8ccd4' };
 
-const FLASK_KEYS = [ 'Q', 'R', 'Z', 'X' ]; // keyboard defaults (combat input: potion, flask2..flask4)
+const FLASK_ACTIONS = [ 'potion', 'flask2', 'flask3', 'flask4' ];
 
 define( 'uiPanel', { id: 'prog-hud', order: 12,
 	mount( ui ) {
@@ -31,7 +32,7 @@ define( 'uiPanel', { id: 'prog-hud', order: 12,
 		PG.ui = ui; PG.game = ui.game;
 		this.flasks = [ 0, 1, 2, 3 ].map( ( i ) => {
 
-			const el = h( 'div', { class: 'pg-flask', title: `Flask ${i + 1}` }, h( 'i' ), h( 'span', { text: FLASK_KEYS[ i ] } ) );
+			const el = h( 'div', { class: 'pg-flask', title: `Flask ${i + 1}` }, h( 'i' ), h( 'span', { text: controlLabel( FLASK_ACTIONS[ i ] ) } ) );
 			el.addEventListener( 'click', () => {
 
 				const r = drinkFlask( ui.game, i );
@@ -43,16 +44,39 @@ define( 'uiPanel', { id: 'prog-hud', order: 12,
 		} );
 		this.buffs = h( 'div', { class: 'pg-buffs' } );
 		this.pointsEl = h( 'div', { class: 'pg-points hidden', onclick: () => ui.open( 'tree', true ) } );
-		const menuBtn = ( label, key, action ) => h( 'button', { title: `${label} (${key})`, onclick: () => ui.action( action ) }, label, h( 'span', { class: 'k', text: key } ) );
+		this.menuButtons = [];
+		const menuBtn = ( label, action ) => {
+
+			const el = h( 'button', { title: label, onclick: () => ui.action( action ) }, label, h( 'span', { class: 'k', text: controlLabel( action ) } ) );
+			this.menuButtons.push( { el, action, label } );
+			return el;
+
+		};
 		return h( 'div', { class: 'hud-prog' },
 			h( 'div', { class: 'pg-hud-flasks' }, this.buffs, this.pointsEl, ...this.flasks ),
-			h( 'div', { class: 'pg-menu' }, menuBtn( 'Bag', 'I', 'inventory' ), menuBtn( 'Char', 'C', 'character' ), menuBtn( 'Skill', 'K', 'skills' ), menuBtn( 'Tree', 'T', 'tree' ), menuBtn( 'Menu', 'Esc', 'pause' ) ) );
+			h( 'div', { class: 'pg-menu' }, menuBtn( 'Bag', 'inventory' ), menuBtn( 'Char', 'character' ), menuBtn( 'Skill', 'skills' ), menuBtn( 'Tree', 'tree' ), menuBtn( 'Menu', 'pause' ) ) );
 
 	},
 	update( ui, game ) {
 
 		const w = game.world;
 		if ( ! w ) return;
+		const device = game.input.device;
+		const bindingDevice = device === 'gamepad' ? 'gamepad' : 'keyboard';
+		if ( this.bindingRevision !== controls.revision || this.bindingDevice !== device ) {
+
+			this.bindingRevision = controls.revision;
+			this.bindingDevice = device;
+			for ( const { el, action, label } of this.menuButtons ) {
+
+				const key = device === 'touch' ? '' : controlLabel( action, bindingDevice );
+				el.lastChild.textContent = key;
+				el.title = label + ( key ? ` (${key})` : '' );
+
+			}
+			this.flasks.forEach( ( el, i ) => el.lastChild.textContent = device === 'touch' ? '' : controlLabel( FLASK_ACTIONS[ i ], bindingDevice ) );
+
+		}
 		const rt = runtime( w );
 		const slots = flaskSlots( game.save );
 		slots.forEach( ( item, i ) => {
@@ -79,7 +103,8 @@ define( 'uiPanel', { id: 'prog-hud', order: 12,
 
 			const pts = pointsLeft( game.save ), asc = ascPointsLeft( game.save );
 			this.pointsEl.classList.toggle( 'hidden', ! pts && ! asc );
-			this.pointsEl.textContent = pts ? `+${pts} passive point${pts > 1 ? 's' : ''} (T)` : `+${asc} ascendancy (T)`;
+			const treeKey = device === 'touch' ? '' : ` (${controlLabel( 'tree', bindingDevice )})`;
+			this.pointsEl.textContent = ( pts ? `+${pts} passive point${pts > 1 ? 's' : ''}` : `+${asc} ascendancy` ) + treeKey;
 			const list = rt ? [ ...rt.buffs.values() ] : [];
 			this.buffs.replaceChildren( ...list.slice( 0, 8 ).map( ( b ) => {
 
@@ -295,8 +320,9 @@ define( 'bootHook', { id: 'progression-ui', order: 40, boot( { game, ui } ) {
 		dirty();
 		// 1 point per level + 1 bonus every 5th level ( tree.js pointsTotal )
 		const got = pointsTotal( level ) - pointsTotal( level - gained );
-		setTimeout( () => ui.toast( `+${got} passive point${got > 1 ? 's' : ''} - ${pointsLeft( game.save )} unspent (T)` ), 600 );
-		if ( level === 30 && ! treeState( game.save ).asc.id ) setTimeout( () => ui.toast( 'Ascendancy unlocked! Open the tree (T) and choose a class.', 'levelup' ), 1800 );
+		const treeHint = () => game.input.device === 'touch' ? '' : ` (${controlLabel( 'tree', game.input.device === 'gamepad' ? 'gamepad' : 'keyboard' )})`;
+		setTimeout( () => ui.toast( `+${got} passive point${got > 1 ? 's' : ''} - ${pointsLeft( game.save )} unspent${treeHint()}` ), 600 );
+		if ( level === 30 && ! treeState( game.save ).asc.id ) setTimeout( () => ui.toast( `Ascendancy unlocked! Open the tree${treeHint()} and choose a class.`, 'levelup' ), 1800 );
 
 	} );
 	game.events.on( 'skillLevel', ( { skill, level } ) => ui.toast( `${get( 'skill', skill )?.name ?? skill} reached level ${level}` ) );

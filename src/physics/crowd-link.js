@@ -37,6 +37,7 @@ export function applyCrowdMode( demo, rebuildAgents = true ) {
 
 export function clearProxies( demo ) {
 
+	demo._proxyGeneration = ( demo._proxyGeneration || 0 ) + 1;
 	for ( const pb of demo.proxyBodies ) {
 
 		demo.peopleColliders.delete( pb.handle );
@@ -56,6 +57,7 @@ export function ensureProxyPool( demo ) {
 	while ( demo.proxyBodies.length > want ) {
 
 		const pb = demo.proxyBodies.pop();
+		if ( pb.agent >= 0 ) demo.proxyMap.delete( pb.agent );
 		demo.peopleColliders.delete( pb.handle );
 		demo.world.removeRigidBody( pb.body );
 
@@ -75,15 +77,29 @@ export function ensureProxyPool( demo ) {
 export function applyProxies( demo, { list, count } ) {
 
 	ensureProxyPool( demo );
-	const seen = new Set();
-	const pool = demo.proxyBodies;
-	const free = [];
-	for ( let k = 0; k < pool.length; k ++ ) if ( pool[ k ].agent < 0 ) free.push( k );
-	const n = Math.min( count, pool.length );
-	for ( let e = 0; e < n; e ++ ) {
+	const entries = [];
+	for ( let e = 0; e < Math.min( count, demo.proxyBodies.length, Math.floor( list.length / 4 ) ); e ++ ) {
 
 		const x = list[ e * 4 ], z = list[ e * 4 + 1 ], agent = list[ e * 4 + 2 ];
-		seen.add( agent );
+		if ( Number.isFinite( x ) && Number.isFinite( z ) && Number.isInteger( agent ) && agent > 0 ) entries.push( { x, z, agent } );
+
+	}
+	const seen = new Set( entries.map( ( entry ) => entry.agent ) );
+	const pool = demo.proxyBodies;
+	// Release absent identities before assigning newcomers, even when the pool was
+	// full. Shrunk slots have already been removed from proxyMap by ensureProxyPool.
+	for ( const [ agent, slot ] of demo.proxyMap ) {
+
+		if ( seen.has( agent ) ) continue;
+		demo.proxyMap.delete( agent );
+		pool[ slot ].agent = - 1;
+		pool[ slot ].body.setTranslation( { x: slot, y: - 50, z: 0 }, false );
+
+	}
+	const free = [];
+	for ( let k = 0; k < pool.length; k ++ ) if ( pool[ k ].agent < 0 ) free.push( k );
+	for ( const { x, z, agent } of entries ) {
+
 		let slot = demo.proxyMap.get( agent );
 		if ( slot === undefined ) {
 
@@ -101,21 +117,14 @@ export function applyProxies( demo, { list, count } ) {
 
 	}
 
-	for ( const [ agent, slot ] of demo.proxyMap ) {
-
-		if ( seen.has( agent ) ) continue;
-		demo.proxyMap.delete( agent );
-		pool[ slot ].agent = - 1;
-		pool[ slot ].body.setTranslation( { x: slot, y: - 50, z: 0 }, false );
-
-	}
-
 	demo.activeProxies = demo.proxyMap.size;
 
 }
 
 export function clearAgentBodies( demo ) {
 
+	demo._agentGeneration = ( demo._agentGeneration || 0 ) + 1;
+	demo._steer = null;
 	for ( const a of demo.agentBodies ) {
 
 		demo.peopleColliders.delete( a.handle );
@@ -139,13 +148,15 @@ export function buildAgentBodies( demo ) {
 	if ( n <= 0 ) return;
 	const token = {};
 	demo._agentBuild = token;
+	crowd.initialize();
+	const generation = crowd.storageGeneration;
 	crowd.renderer.getArrayBufferAsync( crowd.renderBuf.value, null, 0, ( n + 1 ) * 16 ).then( ( buf ) => {
 
-		if ( demo._agentBuild !== token || ! demo.enabled ) return;
+		if ( demo._agentBuild !== token || ! demo.enabled || generation !== crowd.storageGeneration ) return;
 		const R = RAPIER, src = new Float32Array( buf );
 		crowd.set( { rapierAgents: n } );
 		const arr = crowd.rapierIO.value.array; // 2 x vec4 per agent: [ position, steer ]
-		for ( let i = 1; i <= n; i ++ ) {
+		for ( let i = 1; i <= crowd.rapierAgents; i ++ ) {
 
 			const x = src[ i * 4 ], z = src[ i * 4 + 2 ];
 			const body = demo.world.createRigidBody( R.RigidBodyDesc.dynamic().setTranslation( x, 0.9, z ).lockRotations().setLinearDamping( 0.6 ).setCanSleep( false ) );
@@ -168,7 +179,7 @@ export function uploadAgentPositions( demo ) {
 
 	const attr = demo.crowd.rapierIO.value;
 	attr.clearUpdateRanges();
-	attr.addUpdateRange( 0, ( demo.agentBodies.length + 1 ) * 8 );
+	attr.addUpdateRange( 0, Math.min( attr.array.length, ( demo.agentBodies.length + 1 ) * 8 ) );
 	attr.needsUpdate = true;
 
 }
@@ -176,20 +187,25 @@ export function uploadAgentPositions( demo ) {
 export function syncAgentBodies( demo, dt ) {
 
 	if ( ! demo.agentBodies.length || ! demo.crowd.rapierIO ) return;
-	const steer = demo._steer;
+	const steer = demo._steerStorageGeneration === demo.crowd.storageGeneration ? demo._steer : null;
 	const arr = demo.crowd.rapierIO.value.array;
 	for ( const a of demo.agentBodies ) {
 
+		if ( a.index * 8 + 2 >= arr.length ) continue;
 		const v = a.body.linvel();
 		const t = a.body.translation();
-		if ( steer && a.knock <= 0 ) {
+		if ( steer && a.knock <= 0 && a.index * 8 + 5 < steer.length ) {
 
 			const dvx = steer[ a.index * 8 + 4 ], dvz = steer[ a.index * 8 + 5 ];
 			// steer toward the desired velocity; collisions can still push agents around
-			const k = Math.min( 1, dt * 8 );
-			a.body.setLinvel( { x: v.x + ( dvx - v.x ) * k, y: v.y, z: v.z + ( dvz - v.z ) * k }, true );
-			const dev = Math.hypot( v.x - dvx, v.z - dvz );
-			if ( dev > 3.2 && demo.p.knockdown ) a.knock = 1.2;
+			if ( Number.isFinite( dvx ) && Number.isFinite( dvz ) ) {
+
+				const k = Math.min( 1, dt * 8 );
+				a.body.setLinvel( { x: v.x + ( dvx - v.x ) * k, y: v.y, z: v.z + ( dvz - v.z ) * k }, true );
+				const dev = Math.hypot( v.x - dvx, v.z - dvz );
+				if ( dev > 3.2 && demo.p.knockdown ) a.knock = 1.2;
+
+			}
 
 		}
 
@@ -254,14 +270,16 @@ export function fillObstacles( demo ) {
 export function requestReadbacks( demo ) {
 
 	const crowd = demo.crowd;
+	if ( crowd.disposed ) return;
 	if ( crowd.proxies && crowd.proxyBuf && ! demo._proxyPending ) {
 
 		demo._proxyPending = true;
 		const t0 = performance.now();
+		const generation = demo._proxyGeneration, storage = crowd.storageGeneration;
 		crowd.readProxies().then( ( res ) => {
 
 			demo.readbackMs = performance.now() - t0;
-			if ( demo.enabled && demo.crowd.proxies ) applyProxies( demo, res );
+			if ( demo.enabled && demo.crowd.proxies && generation === demo._proxyGeneration && storage === crowd.storageGeneration ) applyProxies( demo, res );
 			demo._proxyPending = false;
 
 		} ).catch( () => ( demo._proxyPending = false ) );
@@ -272,10 +290,15 @@ export function requestReadbacks( demo ) {
 
 		demo._steerPending = true;
 		const t0 = performance.now();
+		const generation = demo._agentGeneration, storage = crowd.storageGeneration, attribute = crowd.rapierIO.value;
 		crowd.readSteer( demo.agentBodies.length + 1 ).then( ( s ) => {
 
 			demo.readbackMs = performance.now() - t0;
-			demo._steer = s;
+			if ( demo.enabled && generation === demo._agentGeneration && storage === crowd.storageGeneration && attribute === crowd.rapierIO?.value ) {
+
+				demo._steer = s; demo._steerStorageGeneration = storage;
+
+			}
 			demo._steerPending = false;
 
 		} ).catch( () => ( demo._steerPending = false ) );

@@ -42,6 +42,9 @@ const clamp = ( v, a, b ) => Math.max( a, Math.min( b, v ) );
 export function dotDamage( world, e, s, amount, type ) {
 
 	if ( amount <= 0 || ! e.alive ) return;
+	// Poison can be derived from a physical hit; that hit's mitigation does not
+	// include chaos immunity. Immunity also applies to explicit chaos DOT sources.
+	if ( type === 'chaos' && e.stats.get( 'chaos_immune' ) > 0 ) return;
 	if ( e.team === TEAM.PLAYER && world.tuning.godMode ) return;
 	if ( e.flags.invulnerable && ! e.data.dodging ) return;
 	amount *= Math.max( 0, e.stats.get( 'damage_taken', [ type ] ) || 1 );

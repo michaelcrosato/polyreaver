@@ -187,6 +187,8 @@ It skips targets it can't reach and goals it gets stuck on.
 ```bash
 npm run sim -- --depth 1-20 --seconds 240        # campaign table (kill time, damage taken, clears)
 npm run sim -- --depth 30 --naked                 # starter gear only (default: player.kit)
+npm run test:regression                         # deterministic bug/feature regressions
+npm run bench:game -- --base-ref 0fd607c --runs 5 # CPU comparison + identical seeded outcomes
 ```
 
 `player.kit { level }` turns the character into a **stand-in for someone who has played to that
@@ -236,9 +238,11 @@ runs the same simulation in the browser.
 - **Style.** three.js "mdcs": tabs, `foo( a, b )`, a blank line after an opening function
   brace and before the closing one. Comments are teaching notes; keep them true when you
   change the code.
-- **Testing policy.** `npm run lint` always. Run `npm run smoke:game` (or the sim) when a
+- **Testing policy.** `npm run lint` and `npm run test:regression` always. Run `npm run smoke:game` (or the sim) when a
   change could break rendering or the simulation. CI runs lint, both builds and a short sim
   on every push, and the full smoke tests nightly.
+  After building, `npm run test:features` covers save import/undo/recovery, an actual second-tab writer conflict,
+  planner sharing/isolation, control recording/conflicts and graphics preference persistence.
 
 ## 6. The player's real device: the Claude link
 

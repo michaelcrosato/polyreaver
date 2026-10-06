@@ -18,4 +18,6 @@ import './ui/skills.js';
 import './ui/vendor.js';
 import './ui/stash.js';
 import './ui/craft.js';
+import './ui/save-manager.js';
+import './ui/planner.js';
 import './render/beams.js';

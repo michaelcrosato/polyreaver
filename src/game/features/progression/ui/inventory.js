@@ -100,7 +100,7 @@ define( 'uiPanel', { id: 'inventory', order: 40, toggle: 'inventory', modal: fal
 				h( 'button', { class: 'pg-btn', text: 'Sort', onclick: () => sortInventory( ui.game ) } ),
 				h( 'label', { class: 'pg-small' }, 'Auto-pickup ', filter ),
 				h( 'span', { class: 'pg-grow' } ),
-				h( 'button', { class: 'pg-btn', text: 'Character (C)', onclick: () => ui.toggle( 'character' ) } ) ),
+				h( 'button', { class: 'pg-btn', text: 'Character', onclick: () => ui.toggle( 'character' ) } ) ),
 			h( 'div', { class: 'pg-dim pg-small', style: { marginTop: '6px' }, text: matchMedia( '(pointer: coarse)' ).matches ? 'Tap an item for its details and actions · drag to move' : 'Click to equip · drag to move · drag onto the world to drop · F picks up nearby items' } ) );
 
 	},

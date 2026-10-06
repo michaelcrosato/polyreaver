@@ -27,6 +27,7 @@ import './data/keystones.js';
 import './data/ascendancy.js';
 import { ensureSave } from './save.js';
 import './stats.js';
+import * as Planner from './planner.js';
 import { updateFlasks, pollPotionInput, drinkFlask } from './flasks.js';
 import { lootSimulation, pickupLoot, lootEntities } from './loot.js';
 import { rollItem, describeItem, itemSummary, makeItem, makeUnique } from './items.js';
@@ -283,7 +284,7 @@ define( 'apiCommand', { id: 'flask.drink', desc: 'Drink flask slot 0-3', args: {
 
 // Every module, for agents, the tools feature, the browser console and tests:
 //   game.progression.items.rollItem( 40, { rarity: 'rare' } ), game.progression.tree.treeSummary( game.save ) ...
-export const MODULES = { items: Items, loot: Loot, tree: Tree, inventory: Inventory, stats: Stats, skills: Skills, flasks: Flasks, save: Save, mechanics: Mechanics, text: Text };
+export const MODULES = { items: Items, loot: Loot, tree: Tree, inventory: Inventory, stats: Stats, skills: Skills, flasks: Flasks, save: Save, mechanics: Mechanics, text: Text, planner: Planner };
 
 // Combat can ask for a skill's total level (save level + gear / tree bonuses).
 define( 'worldHook', { id: 'prog-game-api', order: 1, onWorld( game ) {

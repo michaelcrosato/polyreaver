@@ -11,4 +11,5 @@ artifacts/city/
 artifacts/boot/
 artifacts/unified/
 artifacts/rendering/
+artifacts/performance/
 .env*

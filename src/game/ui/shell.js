@@ -211,7 +211,7 @@ define( 'uiPanel', { id: 'pause', order: 90, toggle: 'pause-menu', modal: true,
 		return h( 'div', { class: 'panel menu' },
 			h( 'h2', { text: 'Paused' } ),
 			h( 'div', { class: 'btns' },
-				btn( 'Resume (Esc)', () => ui.open( 'pause', false ) ),
+				btn( 'Resume', () => ui.open( 'pause', false ) ),
 				btn( 'Return to town', () => {
 
 					ui.open( 'pause', false );

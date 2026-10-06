@@ -26,22 +26,10 @@ import { define, get } from '../../../core/registry.js';
 import { readLoadout, SLOT_ACTIONS } from '../skill-core.js';
 import { touchUI } from './touch-ui.js';
 import { settings, isTouchDevice } from './settings.js';
+import { controls, actionFor, onControls } from './controls.js';
 
-const KEYS = {
-	KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
-	Space: 'dodge', ShiftLeft: 'dodge', ShiftRight: 'dodge', KeyF: 'interact', KeyE: 'interact', KeyQ: 'potion',
-	Digit1: 'skill2', Digit2: 'skill3', Digit3: 'skill4', Digit4: 'skill5',
-	KeyR: 'flask2', KeyZ: 'flask3', KeyX: 'flask4', // flask belt slots 2-4 (Q drinks the best flask)
-	KeyV: 'camera', Escape: 'pause', KeyP: 'pause', KeyI: 'inventory', KeyT: 'tree', KeyK: 'skills', KeyC: 'character',
-	KeyM: 'map', Tab: 'map', Backquote: 'debug'
-};
 const UI_ACTIONS = new Set( [ 'pause', 'inventory', 'tree', 'skills', 'character', 'map', 'debug' ] );
 const MOVE = new Set( [ 'up', 'down', 'left', 'right' ] );
-
-// standard gamepad mapping (Xbox names)
-const PAD = { 0: 'attack', 2: 'skill1', 3: 'skill2', 5: 'skill3', 7: 'skill4', 4: 'skill5', 1: 'dodge', 11: 'dodge', 6: 'potion', 12: 'potion', 13: 'interact' };
-export const PAD_LABELS = { attack: 'A', skill1: 'X', skill2: 'Y', skill3: 'RB', skill4: 'RT', skill5: 'LB', dodge: 'B', potion: 'LT' };
-export const KEY_LABELS = { attack: 'LMB', skill1: 'RMB', skill2: '1', skill3: '2', skill4: '3', skill5: '4', dodge: 'Space', potion: 'Q' };
 
 const DEAD = 0.18; // radial stick dead zone
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), ground = new THREE.Plane( new THREE.Vector3( 0, 1, 0 ), 0 ), hitP = new THREE.Vector3();
@@ -55,12 +43,16 @@ function deadzone( x, y ) {
 
 }
 
-class InputLayer {
+export class InputLayer {
 
 	constructor( game, rc, dom, onUiAction ) {
 
 		this.game = game; this.rc = rc; this.dom = dom; this.onUi = onUiAction;
 		this.keys = new Set();
+		this.sources = new Map(); // physical key/button/pointer -> action, stable until release
+		this.owners = new Map(); // action -> its active physical sources
+		this.ownedPressed = new Set();
+		this.focused = ! document.hidden;
 		this.mouse = { x: innerWidth / 2, y: innerHeight / 2, inside: false };
 		this.moveOwned = false; // did a device write the move vector last frame?
 		this.aimHold = 0; // frames during which a touch / pad cast keeps its aim
@@ -75,33 +67,126 @@ class InputLayer {
 		this.bindKeyboard();
 		this.bindMouse();
 		this.bindTouch();
-		addEventListener( 'blur', () => this.releaseAll() );
-		document.addEventListener( 'visibilitychange', () => document.hidden && this.releaseAll() );
+		addEventListener( 'blur', () => {
+
+			this.focused = false;
+			this.releaseAll();
+
+		} );
+		addEventListener( 'focus', () => {
+
+			this.focused = true;
+			this.pad.resume = true;
+
+		} );
+		document.addEventListener( 'visibilitychange', () => {
+
+			this.focused = ! document.hidden;
+			if ( document.hidden ) this.releaseAll(); else this.pad.resume = true;
+
+		} );
+		addEventListener( 'gamepaddisconnected', ( e ) => {
+
+			if ( e.gamepad.index === this.pad.index ) this.releasePad();
+
+		} );
+		onControls( () => this.releaseAll() );
 
 	}
 
-	press( a ) {
+	press( a, source = a, edge = true ) {
 
-		if ( this.game.paused ) return;
+		if ( this.game.paused || ! this.focused || controls.capturing ) return;
 		const inp = this.inp;
-		if ( ! inp.held.has( a ) ) inp.pressed.add( a );
-		inp.held.add( a );
+		if ( this.sources.has( source ) ) return;
+		this.sources.set( source, a );
+		if ( ! this.owners.has( a ) ) this.owners.set( a, new Set() );
+		this.owners.get( a ).add( source );
+		if ( MOVE.has( a ) ) this.keys.add( a );
+		else {
+
+			if ( edge && ! inp.held.has( a ) ) {
+
+				inp.pressed.add( a );
+				this.ownedPressed.add( a );
+
+			}
+			inp.held.add( a );
+
+		}
 
 	}
 
-	release( a ) {
+	release( a, source = a ) {
 
-		this.inp.held.delete( a );
+		// Look up the original action: a mapping can change before key/pointer-up.
+		const actual = this.sources.get( source );
+		if ( ! actual ) return;
+		this.sources.delete( source );
+		const owners = this.owners.get( actual );
+		owners.delete( source );
+		if ( owners.size ) return;
+		this.owners.delete( actual );
+		this.keys.delete( actual );
+		this.inp.held.delete( actual );
 
 	}
 
 	releaseAll() {
 
+		for ( const source of [ ...this.sources.keys() ] ) this.release( null, source );
+		for ( const a of this.ownedPressed ) this.inp.pressed.delete( a );
+		this.ownedPressed.clear();
 		this.keys.clear();
-		this.inp.held.clear();
+		if ( this.moveOwned ) this.inp.move.x = this.inp.move.z = 0;
+		this.moveOwned = false;
+		this.padMove = null;
+		this.pad.prev = [];
+		this.pad.aiming = false;
+		this.pad.resume = true;
+		this.mouse.inside = false;
+		this.aimHold = 0;
 		this.stick = null;
+		this.touches.clear();
+		for ( const st of this.btn.values() ) st.el?.classList.remove( 'down' );
 		this.btn.clear();
 		this.inp.touchAim.active = false;
+		this.showStick( false );
+
+	}
+
+	releasePad() {
+
+		for ( const source of [ ...this.sources.keys() ] ) if ( source.startsWith( 'pad:' ) ) {
+
+			const a = this.sources.get( source );
+			this.release( null, source );
+			if ( ! this.owners.has( a ) && this.ownedPressed.delete( a ) ) this.inp.pressed.delete( a );
+
+		}
+		this.pad = { prev: [], index: - 1, aiming: false, resume: false };
+		this.padMove = null;
+		if ( this.moveOwned && ! this.keys.size && ! this.stick ) {
+
+			this.inp.move.x = this.inp.move.z = 0;
+			this.moveOwned = false;
+
+		}
+
+	}
+
+	activate( a, source, edge = true ) {
+
+		if ( ! a || ! this.focused || controls.capturing ) return;
+		if ( UI_ACTIONS.has( a ) ) {
+
+			if ( edge ) this.onUi?.( a );
+
+		} else if ( a === 'camera' ) {
+
+			if ( edge ) this.rc.cameraControl?.cycle();
+
+		} else this.press( a, source, edge );
 
 	}
 
@@ -117,24 +202,18 @@ class InputLayer {
 
 		addEventListener( 'keydown', ( e ) => {
 
-			if ( e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement ) return;
-			const a = KEYS[ e.code ];
+			if ( controls.capturing || ! this.focused || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || e.target?.isContentEditable ) return;
+			const a = actionFor( 'keyboard', e.code );
 			if ( ! a ) return;
-			if ( a === 'map' || a === 'dodge' ) e.preventDefault();
+			e.preventDefault(); // a rebound Tab/arrow/function key must not also drive the browser
 			this.device( 'keyboard' );
 			if ( e.repeat ) return;
-			if ( UI_ACTIONS.has( a ) ) return this.onUi?.( a );
-			if ( a === 'camera' ) return this.rc.cameraControl?.cycle();
-			if ( MOVE.has( a ) ) this.keys.add( a );
-			else this.press( a );
+			this.activate( a, 'key:' + e.code );
 
 		} );
 		addEventListener( 'keyup', ( e ) => {
 
-			const a = KEYS[ e.code ];
-			if ( ! a ) return;
-			this.keys.delete( a );
-			if ( ! MOVE.has( a ) ) this.release( a );
+			this.release( null, 'key:' + e.code );
 
 		} );
 
@@ -160,7 +239,7 @@ class InputLayer {
 		dom.addEventListener( 'pointerleave', ( e ) => e.pointerType === 'mouse' && ( this.mouse.inside = false ) );
 		dom.addEventListener( 'pointerdown', ( e ) => {
 
-			if ( e.pointerType !== 'mouse' ) return;
+			if ( e.pointerType !== 'mouse' || controls.capturing || ! this.focused ) return;
 			this.mouse.x = e.clientX; this.mouse.y = e.clientY; this.mouse.inside = true;
 			this.device( 'keyboard' );
 			if ( this.rc.camMode === 'chase' && document.pointerLockElement !== dom && dom.requestPointerLock ) {
@@ -173,10 +252,14 @@ class InputLayer {
 
 			}
 
-			this.press( e.button === 2 ? 'skill1' : 'attack' );
+			const action = actionFor( 'keyboard', 'Mouse' + e.button );
+			if ( action ) e.preventDefault();
+			this.activate( action, 'mouse:' + e.button );
 
 		} );
-		addEventListener( 'pointerup', ( e ) => e.pointerType === 'mouse' && this.release( e.button === 2 ? 'skill1' : 'attack' ) );
+		const releaseMouse = ( e ) => e.pointerType === 'mouse' && this.release( null, 'mouse:' + e.button );
+		addEventListener( 'pointerup', releaseMouse );
+		addEventListener( 'pointercancel', releaseMouse );
 		dom.addEventListener( 'contextmenu', ( e ) => e.preventDefault() );
 		dom.addEventListener( 'wheel', ( e ) => {
 
@@ -195,7 +278,7 @@ class InputLayer {
 		// the canvas: left half = floating move stick, elsewhere = pinch / camera swipe
 		dom.addEventListener( 'pointerdown', ( e ) => {
 
-			if ( e.pointerType === 'mouse' ) return;
+			if ( e.pointerType === 'mouse' || controls.capturing || ! this.focused || this.game.paused ) return;
 			this.device( 'touch' );
 			if ( ! this.stick && e.clientX < innerWidth * 0.45 ) {
 
@@ -270,6 +353,7 @@ class InputLayer {
 
 		el.addEventListener( 'pointerdown', ( e ) => {
 
+			if ( controls.capturing || ! this.focused || this.game.paused ) return;
 			e.preventDefault();
 			e.stopPropagation();
 			el.setPointerCapture?.( e.pointerId );
@@ -281,12 +365,12 @@ class InputLayer {
 			// attack, channels, dodge and potion act on touch-down; other skills wait to see
 			// whether the thumb drags (aim) or lifts (tap = auto-aim)
 			const instant = ! skill || slot === 0 || skill.tags.includes( 'channel' );
-			const st = { action, slot, skill, x0: e.clientX, y0: e.clientY, drag: false, instant, t0: performance.now(), holding: false };
+			const st = { action, slot, skill, el, source: 'touch:' + e.pointerId, x0: e.clientX, y0: e.clientY, drag: false, instant, t0: performance.now(), holding: false };
 			this.btn.set( e.pointerId, st );
 			if ( instant ) {
 
 				this.autoAim();
-				this.press( action );
+				this.press( action, st.source );
 
 			}
 
@@ -322,7 +406,7 @@ class InputLayer {
 			const ta = this.inp.touchAim;
 			if ( st.instant || st.holding ) {
 
-				this.release( st.action );
+				this.release( st.action, st.source );
 
 			} else if ( e.type !== 'pointercancel' ) {
 
@@ -334,8 +418,8 @@ class InputLayer {
 				} else this.autoAim( st.skill?.range ?? 12 );
 
 				this.aimHold = 3;
-				this.press( st.action );
-				this.release( st.action );
+				this.press( st.action, st.source );
+				this.release( st.action, st.source );
 
 			}
 
@@ -393,8 +477,10 @@ class InputLayer {
 	poll( dt ) {
 
 		const inp = this.inp, rc = this.rc;
+		for ( const a of this.ownedPressed ) if ( ! inp.pressed.has( a ) ) this.ownedPressed.delete( a );
 		this.pollGamepad( dt );
 		this.syncTouchVisibility();
+		if ( ! this.focused || controls.capturing ) return;
 		const yaw = rc.camYaw ?? Math.PI;
 		const fx = Math.sin( yaw ), fz = Math.cos( yaw ), rx = - fz, rz = fx;
 
@@ -482,7 +568,7 @@ class InputLayer {
 				if ( st.instant || st.drag || st.holding || performance.now() - st.t0 < 350 ) continue;
 				st.holding = true;
 				this.autoAim( st.skill?.range ?? 12 );
-				this.press( st.action );
+				this.press( st.action, st.source );
 
 			}
 
@@ -496,7 +582,7 @@ class InputLayer {
 	pollGamepad( dt ) {
 
 		this.padMove = null;
-		if ( this.noPads ) return;
+		if ( this.noPads || ! this.focused || controls.capturing ) return;
 		let pads;
 		try {
 
@@ -504,6 +590,7 @@ class InputLayer {
 
 		} catch {
 
+			this.releasePad();
 			this.noPads = true; // blocked by the embedding page's permissions policy (artifact iframes)
 			return;
 
@@ -512,13 +599,34 @@ class InputLayer {
 		let gp = null;
 		for ( const g of pads ) if ( g && g.connected && g.mapping === 'standard' ) {
 
-			gp = g;
-			break;
+			if ( ! gp ) gp = g;
+			if ( g.index === this.pad.index ) {
+
+				gp = g;
+				break;
+
+			}
 
 		}
 
-		if ( ! gp ) return;
+		if ( ! gp ) {
+
+			this.releasePad();
+			return;
+
+		}
+		if ( this.pad.index !== gp.index || this.pad.id !== gp.id ) {
+
+			const resume = this.pad.resume;
+			this.releasePad();
+			this.pad.index = gp.index;
+			this.pad.id = gp.id;
+			this.pad.resume = resume;
+
+		}
 		const prev = this.pad.prev;
+		const resume = !! this.pad.resume;
+		this.pad.resume = false;
 		const btn = ( i ) => {
 
 			const b = gp.buttons[ i ];
@@ -536,17 +644,11 @@ class InputLayer {
 			if ( on ) {
 
 				this.device( 'gamepad' );
-				if ( i === 9 ) this.onUi?.( 'pause' );
-				else if ( i === 8 ) this.onUi?.( 'inventory' );
-				else if ( i === 15 ) this.rc.cameraControl?.cycle();
-				else if ( PAD[ i ] ) {
+				const a = actionFor( 'gamepad', i );
+				if ( a && ! UI_ACTIONS.has( a ) && a !== 'camera' && ! this.pad.aiming ) this.autoAim();
+				this.activate( a, 'pad:' + i, ! resume );
 
-					if ( this.inp.device === 'gamepad' && ! this.pad.aiming ) this.autoAim();
-					this.press( PAD[ i ] );
-
-				}
-
-			} else if ( PAD[ i ] ) this.release( PAD[ i ] );
+			} else this.release( null, 'pad:' + i );
 
 		}
 

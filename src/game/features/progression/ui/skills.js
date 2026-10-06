@@ -9,9 +9,11 @@
 import { define, all, get } from '../../../core/registry.js';
 import { h } from '../../../ui/shell.js';
 import { PG, panelHead, hideTip, dirty, toast, btn, showTextTip } from './common.js';
-import { BAR_LABELS, assignSkill, learnSkill, canLearn, socketSupport, unsocketSupport, supportSlots, supportFits, skillXpToNext, maxSkillLevel, skillLevel } from '../skills.js';
+import { assignSkill, learnSkill, canLearn, socketSupport, unsocketSupport, supportSlots, supportFits, skillXpToNext, maxSkillLevel, skillLevel } from '../skills.js';
 import { runeIcon } from './icons.js';
 import { fmt, modLine } from '../text.js';
+import { SLOT_ACTIONS } from '../../combat/skill-core.js';
+import { controlLabel, controls } from '../../combat/client/controls.js';
 
 const ELEMENT_COLORS = { fire: '#ff7043', cold: '#64b5f6', lightning: '#ffe95a', chaos: '#b07ae0', physical: '#d8c8a8' };
 
@@ -86,7 +88,7 @@ define( 'uiPanel', { id: 'skills', order: 52, toggle: 'skills', modal: true,
 	renderBar( game ) {
 
 		const s = game.save.skills;
-		this.bar.replaceChildren( ...BAR_LABELS.map( ( label, i ) => {
+		this.bar.replaceChildren( ...this.bindingLabels.map( ( label, i ) => {
 
 			const def = s.bar[ i ] ? get( 'skill', s.bar[ i ] ) : null;
 			const el = h( 'div', { class: 'pg-skill' + ( this.slot === i ? ' pg-sel' : '' ), style: def ? { color: skillColor( def ), borderColor: skillColor( def ) } : {} },
@@ -124,7 +126,7 @@ define( 'uiPanel', { id: 'skills', order: 52, toggle: 'skills', modal: true,
 			const row = h( 'div', { class: 'pg-li pg-click' + ( this.sel === def.id ? ' pg-sel' : '' ), style: { opacity: locked ? 0.5 : 1 } },
 				h( 'div', { style: { width: '10px', height: '28px', borderRadius: '3px', background: skillColor( def ), flex: 'none' } } ),
 				h( 'div', { class: 'pg-grow' },
-					h( 'div', { style: { fontWeight: 700 } }, def.name, s.bar.includes( def.id ) ? h( 'span', { class: 'pg-dim pg-small', text: `  [${BAR_LABELS[ s.bar.indexOf( def.id ) ]}]` } ) : null ),
+					h( 'div', { style: { fontWeight: 700 } }, def.name, s.bar.includes( def.id ) ? h( 'span', { class: 'pg-dim pg-small', text: `  [${this.bindingLabels[ s.bar.indexOf( def.id ) ]}]` } ) : null ),
 					h( 'div', { class: 'pg-dim pg-small', text: locked ? `Unlocks at level ${levelReq( def )}` : known ? `Level ${lvl}${lvl < maxSkillLevel( game.save.level ) ? '' : ' (max for your level)'}` : 'Learnable' } ),
 					known ? h( 'div', { class: 'pg-xp' }, h( 'i', { style: { width: `${Math.min( 100, xp / skillXpToNext( lvl ) * 100 )}%` } } ) ) : null ) );
 			row.addEventListener( 'click', () => {
@@ -172,7 +174,7 @@ define( 'uiPanel', { id: 'skills', order: 52, toggle: 'skills', modal: true,
 					loadoutChanged();
 
 				}, { disabled: !! why, title: why || '' } ),
-				btn( `Put on ${BAR_LABELS[ this.slot ]}`, () => this.assign( def.id ), { disabled: !! why, cls: 'pg-primary' } ),
+				btn( `Put on ${this.bindingLabels[ this.slot ]}`, () => this.assign( def.id ), { disabled: !! why, cls: 'pg-primary' } ),
 				s.bar.includes( def.id ) ? btn( 'Remove from bar', () => {
 
 					assignSkill( game.save, s.bar.indexOf( def.id ), null );
@@ -226,8 +228,17 @@ define( 'uiPanel', { id: 'skills', order: 52, toggle: 'skills', modal: true,
 	},
 	update( ui, game ) {
 
-		if ( this.v === PG.version ) return;
+		const device = game.input.device;
+		if ( this.v === PG.version && this.bindingRevision === controls.revision && this.bindingDevice === device ) return;
 		this.v = PG.version;
+		this.bindingRevision = controls.revision;
+		this.bindingDevice = device;
+		this.bindingLabels = SLOT_ACTIONS.map( ( action, i ) => {
+
+			const label = controlLabel( action, device === 'gamepad' ? 'gamepad' : 'keyboard' );
+			return device === 'touch' || label === '—' ? `Slot ${i + 1}` : label;
+
+		} );
 		this.renderBar( game );
 		this.renderList( game );
 		this.renderDetail( game );

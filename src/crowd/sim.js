@@ -15,9 +15,9 @@ import { sampleBlended, channels, emitBoneMatrices, BONES, BONE_ROWS } from './a
 import { CrowdCollider } from './collide.js';
 import { buildCull } from './cull.js';
 import { projectSurface, surfaceHome, constrainSurface } from './surface.js';
+import { storageByteLimit, computeCountLimit, skeletalCapacity } from './limits.js';
 
 export const TAU = Math.PI * 2;
-const SKELETAL_MAX = 131072; // bone buffer cap: 131k agents x 480 B = 63 MB ('bat' has no buffer, no cap)
 export const MAX_PROXIES = 4096;
 
 // Integer hashing: the multiply must wrap in u32 (float math would saturate for
@@ -41,23 +41,43 @@ function crowdRadius( crowd ) {
 
 export function ensurePhysicsBuffers( crowd ) {
 
+	if ( ! crowd.collide && crowd.collider ) {
+
+		crowd.collider.dispose( crowd.renderer ); crowd.collider = null;
+
+	}
 	if ( crowd.collide && ! crowd.collider ) {
 
-		crowd.collider = new CrowdCollider( crowd.capacity );
+		crowd.collider = new CrowdCollider( crowd.capacity, crowd.limits );
 		crowd.collider.buildComputes( crowd.renderBuf );
 
 	}
 
+	crowd.rapierAgents = Math.max( 0, Math.min( crowd.rapierAgents, crowd.count - 1, Math.floor( storageByteLimit( crowd.limits ) / 32 ) - 1 ) );
+	if ( ! crowd.rapierAgents && crowd.rapierIO ) {
+
+		crowd.renderer._attributes?.delete( crowd.rapierIO.value ); crowd.rapierIO = null;
+
+	}
 	if ( crowd.rapierAgents > 0 && ( ! crowd.rapierIO || crowd.rapierIO.value.count < ( crowd.rapierAgents + 1 ) * 2 ) ) {
 
 		// 2 x vec4 per agent: [ position from Rapier (CPU writes), desired velocity (GPU writes) ]
+		if ( crowd.rapierIO ) crowd.renderer._attributes?.delete( crowd.rapierIO.value );
 		crowd.rapierIO = instancedArray( ( crowd.rapierAgents + 1 ) * 2, 'vec4' ).setName( 'rapierIO' );
 
 	}
 
+	if ( ! crowd.proxies && crowd.proxyBuf ) {
+
+		crowd.renderer._attributes?.delete( crowd.proxyBuf.value );
+		crowd.renderer._attributes?.delete( crowd.proxyCounter.value );
+		crowd.proxyBuf = crowd.proxyCounter = null;
+
+	}
 	if ( crowd.proxies && ! crowd.proxyBuf ) {
 
-		crowd.proxyBuf = instancedArray( MAX_PROXIES, 'vec4' ).setName( 'proxyList' );
+		crowd.proxyCapacity = Math.min( MAX_PROXIES, Math.floor( storageByteLimit( crowd.limits ) / 16 ), computeCountLimit( crowd.limits ) );
+		crowd.proxyBuf = instancedArray( crowd.proxyCapacity, 'vec4' ).setName( 'proxyList' );
 		crowd.proxyCounter = instancedArray( 1, 'uint' ).setName( 'proxyCounter' );
 
 	}
@@ -66,6 +86,9 @@ export function ensurePhysicsBuffers( crowd ) {
 
 export function buildComputes( crowd ) {
 
+	crowd.initCompute?.dispose(); crowd.simCompute?.dispose();
+	crowd.skelCompute?.dispose(); crowd.proxyReset?.dispose(); crowd.proxyGather?.dispose();
+	crowd.skelCompute = crowd.proxyReset = crowd.proxyGather = null;
 	const u = crowd.u;
 	const renderBuf = crowd.renderBuf;
 	const simBuf = crowd.simBuf;
@@ -77,7 +100,7 @@ export function buildComputes( crowd ) {
 	// --- init ---------------------------------------------------------------
 	crowd.initCompute = Fn( () => {
 
-		const i = instanceIndex;
+		const i = instanceIndex.add( u.initOffset ).toVar();
 		const fi = float( i );
 		const home = homeOf( crowd, fi );
 		const ang = hashF( fi, 1 ).mul( TAU );
@@ -345,16 +368,17 @@ export function buildComputes( crowd ) {
 export function buildSharedComputes( crowd ) {
 
 	const u = crowd.u, renderBuf = crowd.renderBuf, animBuf = crowd.animBuf;
-	ensurePhysicsBuffers( crowd );
 	crowd.skelCompute?.dispose(); crowd.proxyReset?.dispose(); crowd.proxyGather?.dispose();
+	ensurePhysicsBuffers( crowd );
 
 	// --- skeletal: per-agent forward kinematics -> bone matrices --------------
 	crowd.skelCompute = null;
 	if ( crowd.animSystem === 'skeletal' ) {
 
-		const cap = Math.min( crowd.capacity, SKELETAL_MAX );
+		const cap = skeletalCapacity( crowd.limits, crowd.capacity );
 		if ( ! crowd.boneBuf || crowd.boneCap !== cap ) {
 
+			if ( crowd.boneBuf ) crowd.renderer._attributes?.delete( crowd.boneBuf.value );
 			crowd.boneBuf = instancedArray( cap * BONES * BONE_ROWS, 'vec4' ).setName( 'boneMatrices' );
 			crowd.boneCap = cap;
 
@@ -395,7 +419,7 @@ export function buildSharedComputes( crowd ) {
 			If( i.notEqual( 0 ).and( d.lessThan( u.proxyRadius ) ), () => {
 
 				const slot = atomicAdd( counter.element( 0 ), uint( 1 ) ).toVar();
-				If( slot.lessThan( uint( MAX_PROXIES ) ), () => {
+				If( slot.lessThan( uint( crowd.proxyCapacity ) ), () => {
 
 					proxyBuf.element( slot ).assign( vec4( rd.x, rd.z, float( i ), 0 ) );
 

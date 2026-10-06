@@ -7,6 +7,7 @@
 import { resolveHit } from './combat.js';
 
 let nextFx = 1;
+const RETURN_CATCH_RADIUS = 0.8;
 
 const isFoe = ( a, b ) => a.team !== b.team && b.alive && ! b.flags.untargetable && b.kind !== 'loot' && b.kind !== 'npc' && ! b.flags.inert;
 
@@ -124,6 +125,22 @@ function retarget( world, p, from ) {
 
 }
 
+// First intersection of a moving projectile circle with an entity circle.
+// Testing the whole segment prevents fast bolts crossing a target between ticks.
+function contactFraction( x, z, dx, dz, radius, e ) {
+
+	const ox = x - e.x, oz = z - e.z, rr = radius + e.radius;
+	const c = ox * ox + oz * oz - rr * rr;
+	if ( c <= 0 ) return 0;
+	const a = dx * dx + dz * dz;
+	if ( a === 0 ) return null;
+	const b = ox * dx + oz * dz, disc = b * b - a * c;
+	if ( b >= 0 || disc < 0 ) return null;
+	const t = ( - b - Math.sqrt( disc ) ) / a;
+	return t >= 0 && t <= 1 ? t : null;
+
+}
+
 export function updateEffects( world, dt ) {
 
 	const L = world.layout;
@@ -145,28 +162,56 @@ export function updateEffects( world, dt ) {
 
 		}
 
-		if ( p.returning && p.owner ) p.dir = Math.atan2( p.owner.x - p.x, p.owner.z - p.z );
-		const step = p.speed * dt;
-		const nx = p.x + Math.sin( p.dir ) * step, nz = p.z + Math.cos( p.dir ) * step;
-		const clear = L.raycast( p.x, p.z, nx, nz );
-		p.x += ( nx - p.x ) * clear; p.z += ( nz - p.z ) * clear;
-		p.travelled += step * clear;
-		if ( clear < 1 ) {
+		let catchDistance = Infinity;
+		if ( p.returning && p.owner ) {
 
-			end( world, p, 'wall' );
-			continue;
+			const distance = Math.hypot( p.owner.x - p.x, p.owner.z - p.z );
+			if ( distance <= RETURN_CATCH_RADIUS ) {
+
+				end( world, p, 'returned' );
+				continue;
+
+			}
+
+			p.dir = Math.atan2( p.owner.x - p.x, p.owner.z - p.z );
+			catchDistance = distance - RETURN_CATCH_RADIUS;
 
 		}
+		// Stop the return segment at the catch boundary: a fast projectile must not
+		// cross its owner and hit something beyond them or expire as a range impact.
+		const step = Math.min( p.speed * dt, Math.max( 0, p.range - p.travelled ), catchDistance );
+		const x = p.x, z = p.z, travelled = p.travelled;
+		const dx = Math.sin( p.dir ) * step, dz = Math.cos( p.dir ) * step;
+		const clear = L.raycast( x, z, x + dx, z + dz );
+		const sx = dx * clear, sz = dz * clear;
+		const contacts = [];
+		world.spatial.forEach( x + sx / 2, z + sz / 2, step * clear / 2 + p.radius, ( e ) => {
 
-		for ( const e of world.spatial.query( p.x, p.z, p.radius, ( e ) => isFoe( p, e ) && ! p.hitIds.has( e.id ) ) ) {
+			const t = contactFraction( x, z, sx, sz, p.radius, e );
+			if ( t !== null ) contacts.push( { e, t } );
+
+		}, ( e ) => isFoe( p, e ) && ! p.hitIds.has( e.id ) );
+		contacts.sort( ( a, b ) => a.t - b.t );
+		let chained = false;
+		for ( const { e, t } of contacts ) {
+
+			if ( ! isFoe( p, e ) || p.hitIds.has( e.id ) ) continue;
+			p.x = x + sx * t; p.z = z + sz * t;
+			p.travelled = travelled + step * clear * t;
 
 			p.hitIds.add( e.id );
 			const r = resolveHit( world, p.owner, e, { ...p.hit, originX: p.x - Math.sin( p.dir ), originZ: p.z - Math.cos( p.dir ) } );
 			p.onHit?.( world, p, e, r );
+			if ( ! p.alive ) break;
 			if ( p.chain > 0 ) {
 
 				p.chain --;
-				if ( retarget( world, p, e ) ) break;
+				if ( retarget( world, p, e ) ) {
+
+					chained = true;
+					break;
+
+				}
 
 			}
 
@@ -182,6 +227,15 @@ export function updateEffects( world, dt ) {
 
 		}
 
+		if ( p.alive && ! chained ) {
+
+			p.x = x + sx; p.z = z + sz;
+			p.travelled = travelled + step * clear;
+			if ( clear < 1 ) end( world, p, 'wall' );
+			else if ( step >= catchDistance ) end( world, p, 'returned' );
+
+		}
+
 		if ( p.alive && p.travelled >= p.range ) {
 
 			if ( p.returns && ! p.returning ) {
@@ -194,7 +248,7 @@ export function updateEffects( world, dt ) {
 
 		}
 
-		if ( p.alive && p.returning && p.owner && Math.hypot( p.owner.x - p.x, p.owner.z - p.z ) < 0.8 ) end( world, p, 'returned' );
+		if ( p.alive && p.returning && p.owner && Math.hypot( p.owner.x - p.x, p.owner.z - p.z ) <= RETURN_CATCH_RADIUS ) end( world, p, 'returned' );
 
 	}
 

@@ -38,11 +38,16 @@ const LOCAL_TEXT = {
 // --- rng helpers ----------------------------------------------------------------------------
 
 let uidSeq = 0;
+// Identity belongs to the saved character, not to its seeded loot stream. A new
+// process must never mint the same ids as an earlier session of the same seed.
+const uidNamespace = globalThis.crypto?.randomUUID?.() || `${Date.now().toString( 36 )}-${Math.random().toString( 36 ).slice( 2 )}-${Math.random().toString( 36 ).slice( 2 )}`;
 
 export function newUid( rng ) {
 
-	uidSeq = ( uidSeq + 1 ) % 1679616;
-	return 'i' + Math.floor( rng.next() * 2176782336 ).toString( 36 ) + uidSeq.toString( 36 );
+	// Keep the historical draw so item values and all later loot rolls stay exactly
+	// reproducible. Repairing an identity passes no RNG and consumes no game draws.
+	rng?.next();
+	return `i-${uidNamespace}-${( ++ uidSeq ).toString( 36 )}`;
 
 }
 

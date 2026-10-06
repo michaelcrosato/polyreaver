@@ -271,6 +271,29 @@ function buildHit( ctx, name = 'main', extra = {} ) {
 
 // --- casting -------------------------------------------------------------------------
 
+// Plan a skill's final cost without changing resources. Life costs take precedence
+// over shield-first costs and must leave the caster alive. The HUD uses the same
+// affordability check as casting, including split shield / mana payments.
+export function skillCost( e, amount, tags = [] ) {
+
+	const cost = { life: 0, mana: 0, shield: 0, affordable: false };
+	if ( e.stats.get( 'skill_cost_life', tags ) > 0 ) {
+
+		cost.life = amount;
+		cost.affordable = e.alive && e.life > amount;
+
+	} else {
+
+		cost.shield = e.stats.get( 'skill_cost_shield_first', tags ) > 0 ? Math.min( Math.max( 0, e.shield ), amount ) : 0;
+		cost.mana = amount - cost.shield;
+		cost.affordable = e.alive && e.mana >= cost.mana;
+
+	}
+
+	return cost;
+
+}
+
 // The single entry point that turns "use skill X now" into an action: the player
 // controller, minions with skills, bots and the agent API all call it.
 //   -> 'ok' | 'cooldown' | 'mana' | 'busy' | 'invalid'
@@ -286,7 +309,8 @@ export function castSkill( world, e, id, opts = {} ) {
 	const lo = mine ? readLoadout( world.game?.save ) : null;
 	const level = opts.level ?? ( mine ? skillLevel( lo, id, e ) : Math.max( 1, Math.round( ( e.level ?? 1 ) / 2 ) ) );
 	const ctx = makeContext( world, e, skill, level, opts.supports ?? ( mine ? supportList( lo, id ) : [] ) );
-	if ( ! opts.free && e.mana < ctx.manaCost ) return 'mana';
+	const cost = skillCost( e, opts.free ? 0 : ctx.manaCost, ctx.tags );
+	if ( ! opts.free && ! cost.affordable ) return 'mana'; // the existing resource-shortage result
 
 	// aim: a point on the ground; too close to the body means "the way I face"
 	let aimX = opts.aimX ?? e.anim.aimX, aimZ = opts.aimZ ?? e.anim.aimZ;
@@ -345,7 +369,17 @@ export function castSkill( world, e, id, opts = {} ) {
 	const def = skill.action( level, ctx );
 	const act = world.act( e, def, { aimX, aimZ, target: ctx.target, ctx, force: opts.force } );
 	if ( ! act ) return 'busy';
-	if ( ! opts.free ) e.mana -= ctx.manaCost;
+	if ( ! opts.free ) {
+
+		e.life -= cost.life;
+		e.shield -= cost.shield;
+		e.mana -= cost.mana;
+		if ( e.stats.get( 'skill_cost_life', ctx.tags ) > 0 ) e.mana = e.maxMana;
+		// Exact spending survives same-step leech, flasks and refunds. Shield damage,
+		// life costs and mana lost to damage protection never count as mana spent.
+		if ( cost.mana > 0 ) world.events.emit( 'manaSpent', { entity: e, amount: cost.mana, skill: id } );
+
+	}
 	if ( ctx.cooldown > 0 ) {
 
 		e.cooldowns.set( id, world.time + ctx.cooldown );
@@ -587,7 +621,8 @@ export function skillTooltip( game, id, { level, supports, entity } = {} ) {
 	const lines = [
 		skill.tags.filter( ( t ) => ! t.startsWith( 'sk:' ) ).join( ', ' ),
 		`Level ${lv}`,
-		ctx.manaCost ? `Mana cost: ${ctx.manaCost}` : 'No mana cost',
+		ctx.manaCost ? e.stats.get( 'skill_cost_life', ctx.tags ) > 0 ? `Life cost: ${ctx.manaCost}` :
+			e.stats.get( 'skill_cost_shield_first', ctx.tags ) > 0 ? `Cost: ${ctx.manaCost} (Energy Shield before Mana)` : `Mana cost: ${ctx.manaCost}` : 'No resource cost',
 		ctx.cooldown ? `Cooldown: ${ctx.cooldown.toFixed( 2 )} s` : null,
 		`${ctx.isAttack ? 'Attack' : 'Cast'} time: ${castTime.toFixed( 2 )} s`,
 		`Critical strike chance: ${critChance.toFixed( 1 )}%`,
